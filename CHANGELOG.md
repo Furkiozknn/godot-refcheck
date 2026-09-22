@@ -2,22 +2,25 @@
 
 ## Unreleased
 
-### Fixed
+- `missing-node-path`: a script reaching for `$Head/Body` — or
+  `get_node("Head/Body")` — that the scene it runs in does not contain. The
+  engine returns `null` for a path it cannot find, so the failure lands one
+  line later, at run time, on whichever branch gets there first.
 
-- **The GitHub Action failed on projects with no findings.** The step read its
-  counts out of the human-readable summary, and a single clean project does not
-  print one — it prints "no problems found." The `grep` matched nothing, and
-  under the runner's `bash -e` that took the whole step down with exit 1. The
-  action worked on repositories that had something wrong with them and failed on
-  the ones that did not, which is the wrong way round. Counts now come from
-  `--json`, which always carries them.
+  The check exists because the connection resolver was pointed at a file
+  section most projects never write: the four games on this account have **no**
+  `[connection]` blocks and 145 `.connect(` call sites in GDScript. `$Head/Body`
+  is the same claim in the place it is actually made.
 
-  It shipped because the action's CI job only ever ran one shape: several
-  projects at once, findings present, `fail-on: never`. `tools/action_smoke.py`
-  now runs the action's own shell, with the runner's exact flags, across clean
-  and broken fixtures at every `fail-on` level, and a second CI job runs the
-  real action against a clean project. Against the old `action.yml` that gate
-  fails on the first three cases.
+  Two rules were added only after measuring, and each removed findings from
+  code that ships. Ignoring the receiver of `get_node` produced 132 findings on
+  one game — a headless test harness asking a scene it had just instantiated.
+  Calling a run-time node missing produced the last one: a game builds its
+  tool strip with `alet.name = "Aletler"` and `add_child`, so no `.tscn`
+  mentions it. Across five real projects the check now reports nothing, which
+  is the answer code that runs should get.
+
+- 107 -> 128 tests.
 
 ## 0.2.0
 

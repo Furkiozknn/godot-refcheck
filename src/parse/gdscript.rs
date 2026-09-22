@@ -119,6 +119,172 @@ pub fn resource_loads(src: &str) -> Vec<(usize, String)> {
     out
 }
 
+/// `(byte offset, node path)` for every node path a script claims exists:
+/// the bare `$Head/Body` form and `get_node("Head/Body")` with a literal.
+///
+/// WHY THIS IS HERE. A `.tscn` writes its signal connections down and
+/// `checks.rs` resolves those against the scene tree. Most projects do not
+/// connect in the editor at all - the four games in this ecosystem have **no**
+/// `[connection]` blocks and 145 `.connect(` call sites in GDScript instead -
+/// so the resolver was pointed at a file section those projects never write.
+/// `$Head/Body` is the same claim as a connection's `to=`, and when it is
+/// wrong the engine hands back `null` and the next line dies at run time, on
+/// the branch that reaches it.
+///
+/// DELIBERATELY NOT COLLECTED, each for the same reason the rest of this tool
+/// gives: a path it cannot see is not a path it may judge.
+///   * `%UniqueName` - resolved by owner, not by path.
+///   * `..`, `.` and absolute `/root/...` - they leave this scene.
+///   * `get_node_or_null` and `has_node` - those exist to ASK, and a missing
+///     path is the answer rather than a fault.
+///   * `$"quoted"`, `get_node("a" + b)`, `%s` interpolation - built at run time.
+pub fn node_paths(src: &str) -> Vec<(usize, String)> {
+    let mut out: Vec<(usize, String)> = Vec::new();
+
+    // --- bare `$Head/Body` -------------------------------------------------
+    // Its own pass rather than the token stream: `lex` drops whitespace, and
+    // `$`, `Head`, `/`, `Body` would arrive as four tokens with no way left to
+    // tell `$Head/Body` from `$Head / Body`.
+    let b: Vec<char> = src.chars().collect();
+    let mut offsets = Vec::with_capacity(b.len() + 1);
+    let mut acc = 0usize;
+    for c in &b {
+        offsets.push(acc);
+        acc += c.len_utf8();
+    }
+    offsets.push(acc);
+
+    let mut i = 0usize;
+    while i < b.len() {
+        let c = b[i];
+        if c == '#' {
+            while i < b.len() && b[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if c == '"' || c == '\'' {
+            let quote = c;
+            let triple = i + 2 < b.len() && b[i + 1] == quote && b[i + 2] == quote;
+            i += if triple { 3 } else { 1 };
+            while i < b.len() {
+                if !triple && b[i] == '\\' {
+                    i += 2;
+                    continue;
+                }
+                if triple {
+                    if b[i] == quote && i + 2 < b.len() && b[i + 1] == quote && b[i + 2] == quote {
+                        i += 3;
+                        break;
+                    }
+                } else {
+                    if b[i] == quote {
+                        i += 1;
+                        break;
+                    }
+                    if b[i] == '\n' {
+                        break;
+                    }
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if c == '$' {
+            let start = i + 1;
+            let mut j = start;
+            while j < b.len()
+                && (b[j].is_alphanumeric() || b[j] == '_' || b[j] == '/' || b[j] == '-')
+            {
+                j += 1;
+            }
+            if j > start {
+                let raw: String = b[start..j].iter().collect();
+                if let Some(path) = normalise_node_path(&raw) {
+                    out.push((offsets[i], path));
+                }
+            }
+            i = j.max(i + 1);
+            continue;
+        }
+        i += 1;
+    }
+
+    // --- `get_node("Head/Body")` ------------------------------------------
+    // The token window refuses a computed argument the same way
+    // `resource_loads` does, and the RECEIVER has to be this script.
+    //
+    // `oyun.get_node("Dunya/Oyuncu")` asks another node, and its path is
+    // written against THAT node's scene. Ignoring the receiver produced 132
+    // findings on one shipped game - every one of them a test harness
+    // reaching into a scene it had just instantiated. A check that loud is
+    // not a check.
+    let toks = lex(src);
+    for (i, w) in toks.windows(4).enumerate() {
+        if let (Tok::Ident(name), Tok::Punct('('), Tok::Str { value, offset }, tail) =
+            (&w[0], &w[1], &w[2], &w[3])
+        {
+            if name != "get_node" {
+                continue;
+            }
+            // Preceded by `.`: only `self.get_node(...)` is this script.
+            if i > 0 && toks[i - 1] == Tok::Punct('.') {
+                let is_self = i > 1 && toks[i - 2] == Tok::Ident("self".to_string());
+                if !is_self {
+                    continue;
+                }
+            }
+            match tail {
+                Tok::Punct(')') | Tok::Punct(',') => {
+                    if let Some(path) = normalise_node_path(value) {
+                        out.push((*offset, path));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Names a script gives to nodes it creates: `alet.name = "Aletler"`.
+///
+/// A node added with `add_child` at run time is in no `.tscn`, so a path
+/// reaching it looks missing to any static tool. This is the same class of
+/// blindness README "Limitations" already states for computed paths, and the
+/// cheapest sound way to stay quiet about it: if some script in the project
+/// names a node exactly the way the missing segment is spelled, that node may
+/// well be built at run time and nothing here can prove otherwise.
+pub fn assigned_node_names(src: &str) -> Vec<String> {
+    let toks = lex(src);
+    let mut out = Vec::new();
+    for w in toks.windows(3) {
+        if let (Tok::Ident(key), Tok::Punct('='), Tok::Str { value, .. }) = (&w[0], &w[1], &w[2]) {
+            if key == "name" && !value.is_empty() {
+                out.push(value.clone());
+            }
+        }
+    }
+    out
+}
+
+/// A node path this tool is willing to judge, normalised; `None` otherwise.
+fn normalise_node_path(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    let t = t.strip_prefix("./").unwrap_or(t);
+    let t = t.trim_end_matches('/');
+    if t.is_empty() || t.starts_with('/') || t.contains('%') {
+        return None;
+    }
+    if t.split('/').any(|s| s == ".." || s == "." || s.is_empty()) {
+        return None;
+    }
+    Some(t.to_string())
+}
+
 /// Every string literal in the file (used only by the advisory unused-asset scan).
 pub fn string_literals(src: &str) -> Vec<String> {
     lex(src)
@@ -303,5 +469,84 @@ mod tests {
         let v = icon_annotation("@icon(\"res://icons/hero.svg\")\nextends Node\n").unwrap();
         assert_eq!(v.1, "res://icons/hero.svg");
         assert!(icon_annotation("@export var x: int\n").is_none());
+    }
+
+    fn paths(src: &str) -> Vec<String> {
+        node_paths(src).into_iter().map(|(_, p)| p).collect()
+    }
+
+    #[test]
+    fn a_bare_dollar_path_is_a_node_reference() {
+        assert_eq!(paths("func _ready(): $Head/Body.hide()\n"), ["Head/Body"]);
+        assert_eq!(paths("$Button.pressed.connect(_go)\n"), ["Button"]);
+    }
+
+    #[test]
+    fn the_path_stops_where_the_expression_does() {
+        // `$A/B.c()` is the node A/B; the member access is not part of it.
+        assert_eq!(paths("$A/B.visible = true\n"), ["A/B"]);
+        assert_eq!(paths("if $A/B: pass\n"), ["A/B"]);
+        assert_eq!(paths("var x = [$A, $B]\n"), ["A", "B"]);
+    }
+
+    #[test]
+    fn a_dollar_in_a_comment_or_a_string_is_not_a_path() {
+        assert!(paths("# $Head/Body is gone\n").is_empty());
+        assert!(paths("var s = \"$Head/Body\"\n").is_empty());
+        assert!(paths("var s = \"\"\"\n$Head\n\"\"\"\n").is_empty());
+    }
+
+    #[test]
+    fn unique_names_and_parent_steps_are_out_of_scope() {
+        // `%Name` is resolved by owner; `..` leaves the scene; an absolute
+        // path addresses the live tree rather than this scene.
+        assert!(paths("%Hero.hide()\n").is_empty());
+        assert!(paths("$\"%Hero\".hide()\n").is_empty());
+        assert!(paths("$../Sibling.hide()\n").is_empty());
+        assert!(paths("get_node(\"/root/Main\").hide()\n").is_empty());
+    }
+
+    #[test]
+    fn get_node_with_a_literal_is_a_node_reference() {
+        assert_eq!(paths("get_node(\"Head/Body\").hide()\n"), ["Head/Body"]);
+        assert_eq!(paths("self.get_node(\"Head\").hide()\n"), ["Head"]);
+    }
+
+    #[test]
+    fn get_node_on_another_receiver_is_not_this_scenes_path() {
+        // On one shipped game, ignoring the receiver produced 132 findings:
+        // a test harness asking a scene it had just instantiated.
+        assert!(paths("oyun.get_node(\"Dunya/Oyuncu\").hide()\n").is_empty());
+        assert!(paths("get_tree().root.get_node(\"Main\").hide()\n").is_empty());
+    }
+
+    #[test]
+    fn asking_whether_a_node_exists_is_not_a_claim_that_it_does() {
+        assert!(paths("if has_node(\"Head\"): pass\n").is_empty());
+        assert!(paths("var n = get_node_or_null(\"Head\")\n").is_empty());
+    }
+
+    #[test]
+    fn a_path_built_at_run_time_is_left_alone() {
+        assert!(paths("get_node(\"levels/\" + name).hide()\n").is_empty());
+        assert!(paths("get_node(\"lvl%s\" % n).hide()\n").is_empty());
+    }
+
+    #[test]
+    fn the_same_path_twice_is_reported_once_per_place() {
+        // Dedup is by (offset, path), so two different lines both count.
+        assert_eq!(node_paths("$A.hide()\n$A.show()\n").len(), 2);
+    }
+
+    #[test]
+    fn a_name_a_script_gives_a_node_is_collected() {
+        let src = "var n := Node.new()\nn.name = \"Aletler\"\nadd_child(n)\n";
+        assert_eq!(assigned_node_names(src), ["Aletler"]);
+    }
+
+    #[test]
+    fn a_name_in_a_comment_is_not_collected() {
+        assert!(assigned_node_names("# name = \"Aletler\"\n").is_empty());
+        assert!(assigned_node_names("var x = 1\n").is_empty());
     }
 }

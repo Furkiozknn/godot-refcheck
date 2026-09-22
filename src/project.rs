@@ -83,6 +83,11 @@ pub struct Project {
     pub scenes: BTreeMap<String, SceneFile>,
     /// global `class_name` -> the scripts that declare it.
     pub class_names: BTreeMap<String, Vec<String>>,
+    /// script res:// path -> the node paths it claims exist, with their lines.
+    pub script_node_paths: BTreeMap<String, Vec<(usize, String)>>,
+    /// Every name a script gives a node it creates (`x.name = "Aletler"`).
+    /// A node built at run time is in no scene file; see `assigned_node_names`.
+    pub runtime_node_names: BTreeSet<String>,
     /// source asset -> the res:// paths its importer produces outside `.godot/`.
     pub import_products: BTreeMap<String, Vec<String>>,
     pub unreadable: Vec<String>,
@@ -387,12 +392,19 @@ impl Project {
     fn read_scene(&mut self, res: &str, src: &str) {
         let mut scene = SceneFile::default();
         let mut seen_root = false;
+        let mut current_node: Option<String> = None;
         for e in cfgfile::parse(src) {
             match e {
                 Entry::Section(s) => {
                     let get = |k: &str| -> Option<String> {
                         s.attrs.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone())
                     };
+                    // Any section that is not a [node] ends the previous
+                    // one: a `script =` under [sub_resource] belongs to that
+                    // resource, not to the node written above it.
+                    if s.name != "node" {
+                        current_node = None;
+                    }
                     match s.name.as_str() {
                         "gd_scene" | "gd_resource" => {
                             if let Some(uid) = get("uid") {
@@ -448,6 +460,15 @@ impl Project {
                                     id_references(v).into_iter().find(|(k, _)| k == "ExtResource")
                                 })
                                 .map(|(_, id)| id);
+                            let path = if is_root {
+                                ".".to_string()
+                            } else {
+                                match parent.as_deref() {
+                                    None | Some(".") => name.clone(),
+                                    Some(p) => format!("{}/{}", p, name),
+                                }
+                            };
+                            current_node = Some(path);
                             scene.nodes.push(NodeDecl {
                                 name,
                                 parent: if is_root { None } else { parent },
@@ -489,6 +510,18 @@ impl Project {
                     }
                 }
                 Entry::Assign(a) => {
+                    // `script = ExtResource("1_x")` inside a [node] block is
+                    // what ties a .gd file to a scene. Without it a path
+                    // written in that script has no tree to be resolved
+                    // against, and the check below stays silent.
+                    if a.key == "script" {
+                        if let (Some(node), Some((_, id))) = (
+                            current_node.clone(),
+                            id_references(&a.value).into_iter().find(|(k, _)| k == "ExtResource"),
+                        ) {
+                            scene.scripts.insert(node, id);
+                        }
+                    }
                     for (kind, id) in id_references(&a.value) {
                         self.id_uses.push(IdUse { from: res.to_string(), line: a.line, kind, id });
                     }
@@ -501,6 +534,16 @@ impl Project {
     }
 
     fn read_script(&mut self, res: &str, src: &str) {
+        if res.ends_with(".gd") {
+            self.runtime_node_names.extend(gdscript::assigned_node_names(src));
+            let claims: Vec<(usize, String)> = gdscript::node_paths(src)
+                .into_iter()
+                .map(|(off, path)| (cfgfile::line_of(src, off), path))
+                .collect();
+            if !claims.is_empty() {
+                self.script_node_paths.insert(res.to_string(), claims);
+            }
+        }
         for (off, raw) in gdscript::resource_loads(src) {
             let line = cfgfile::line_of(src, off);
             if raw.starts_with("uid://") {

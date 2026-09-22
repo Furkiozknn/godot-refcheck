@@ -330,3 +330,91 @@ fn a_healthy_project_is_never_rewritten() {
         assert!(r.is_empty(), "{} would be rewritten: {:?}", name, r);
     }
 }
+
+// ---------------------------------------------------------------------------
+// missing-node-path: `$Head/Body` inside a script
+//
+// The shape comes from this ecosystem's own games: four shipped Godot projects
+// with **no** `[connection]` blocks at all and 145 `.connect(` call sites in
+// GDScript. The resolver that judges a connection's `to=` was pointed at a
+// file section those projects never write.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_script_path_that_the_scene_does_not_contain_is_reported() {
+    let f = of(&scan("nodepath"), "missing-node-path");
+    let paths: BTreeSet<String> =
+        f.iter().map(|x| x.message.split('"').nth(1).unwrap_or("").to_string()).collect();
+    assert_eq!(paths, ["Panel/Gitti", "Yok"].iter().map(|s| s.to_string()).collect());
+}
+
+#[test]
+fn it_is_reported_against_the_script_not_the_scene() {
+    // The line a human has to change is in the .gd file.
+    let f = of(&scan("nodepath"), "missing-node-path");
+    assert!(f.iter().all(|x| x.file.ends_with("level.gd")), "{:#?}", f);
+    assert!(f.iter().all(|x| x.line > 1), "{:#?}", f);
+}
+
+#[test]
+fn a_path_that_resolves_through_an_instanced_scene_is_silent() {
+    // `$Panel/Deep` reaches into inner.tscn, which level.tscn instances.
+    let f = of(&scan("nodepath"), "missing-node-path");
+    assert!(!f.iter().any(|x| x.message.contains("Panel/Deep")), "{:#?}", f);
+}
+
+#[test]
+fn nothing_under_a_placeholder_is_judged() {
+    let f = of(&scan("nodepath"), "missing-node-path");
+    assert!(!f.iter().any(|x| x.message.contains("Later")), "{:#?}", f);
+}
+
+#[test]
+fn a_node_some_script_names_at_run_time_is_not_called_missing() {
+    // `n.name = "Runtime"; add_child(n)` puts a node in no .tscn at all. A
+    // shipped game does exactly this (`alet.name = "Aletler"`), and calling
+    // it missing was this check's only false positive across five real
+    // projects.
+    let f = of(&scan("nodepath"), "missing-node-path");
+    assert!(!f.iter().any(|x| x.message.contains("Runtime")), "{:#?}", f);
+}
+
+#[test]
+fn a_path_asked_of_another_node_is_not_this_scenes_business() {
+    // `other.get_node("Nope")` is written against whatever `other` is. On one
+    // shipped game, ignoring the receiver produced 132 findings - every one a
+    // test harness reaching into a scene it had just instantiated.
+    let f = of(&scan("nodepath"), "missing-node-path");
+    assert!(!f.iter().any(|x| x.message.contains("Nope")), "{:#?}", f);
+}
+
+#[test]
+fn a_computed_or_unique_path_is_left_alone() {
+    let f = of(&scan("nodepath"), "missing-node-path");
+    assert!(!f.iter().any(|x| x.message.contains("Benzersiz")), "{:#?}", f);
+    assert!(!f.iter().any(|x| x.message.contains("Panel/\" +")), "{:#?}", f);
+}
+
+#[test]
+fn a_script_on_a_child_resolves_from_that_child() {
+    // child.gd sits on "Kid" and says `$Sprite`, meaning "Kid/Sprite".
+    // Resolving from the scene root would invent a finding.
+    let f = of(&scan("nodepath"), "missing-node-path");
+    assert!(!f.iter().any(|x| x.file.ends_with("child.gd")), "{:#?}", f);
+}
+
+#[test]
+fn a_script_no_scene_attaches_is_not_judged() {
+    // An autoload, a RefCounted helper, a script attached from code: none of
+    // them has a tree to be judged against.
+    let f = of(&scan("scripts"), "missing-node-path");
+    assert!(f.is_empty(), "{:#?}", f);
+}
+
+#[test]
+fn the_check_can_be_skipped_like_any_other() {
+    let mut skip = BTreeSet::new();
+    skip.insert("missing-node-path".to_string());
+    let f = scan_with("nodepath", Options { skip, ..Options::default() });
+    assert!(of(&f, "missing-node-path").is_empty());
+}

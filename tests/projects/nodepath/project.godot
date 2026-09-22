@@ -1,0 +1,7 @@
+config_version=5
+
+[application]
+
+config/name="nodepath"
+run/main_scene="res://level.tscn"
+config/features=PackedStringArray("4.4")

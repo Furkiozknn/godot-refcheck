@@ -159,6 +159,10 @@ pub fn run(p: &Project, o: &Options) -> Vec<Finding> {
         out.extend(broken_connections(p, o));
     }
 
+    if o.wants("missing-node-path") {
+        out.extend(missing_node_paths(p));
+    }
+
     if o.wants("duplicate-class-name") {
         for (name, owners) in &p.class_names {
             if owners.len() < 2 {
@@ -325,6 +329,114 @@ fn broken_connections(p: &Project, _o: &Options) -> Vec<Finding> {
         }
     }
     out
+}
+
+/// `$Head/Body` and `get_node("Head/Body")` inside a script, resolved against
+/// the scenes that attach that script.
+///
+/// The claim is the same one a `[connection]` makes - *this node is in this
+/// scene* - written in the place most projects actually write it. When it is
+/// wrong the engine returns `null`, and the failure surfaces one line later,
+/// at run time, only on the branch that reaches it.
+///
+/// THREE THINGS KEEP THIS QUIET WHEN IT SHOULD BE.
+///
+/// 1. A script with no scene attaching it is skipped entirely. An autoload, a
+///    `RefCounted` helper, a script attached from code - none of them have a
+///    tree to be judged against, and guessing one would be the whole point of
+///    the tool thrown away.
+/// 2. A script attached to SEVERAL scenes is reported only if the path is
+///    missing in EVERY one of them. A base script shared by five scenes
+///    legitimately reaches a node only four of them have.
+/// 3. The path is resolved from the node the script is attached to, not from
+///    the scene root. `$Sprite` written on a child means that child's
+///    `Sprite`, and treating it as the root's would invent findings.
+fn missing_node_paths(p: &Project) -> Vec<Finding> {
+    let mut out = Vec::new();
+    let mut resolver = Resolver::new(p);
+
+    // script -> every (scene, node path) that attaches it.
+    let mut attached: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    for (res, scene) in &p.scenes {
+        for (node_path, ext_id) in &scene.scripts {
+            if let Some(target) = scene.target_of(ext_id, p) {
+                if target.ends_with(".gd") {
+                    attached.entry(target).or_default().push((res.clone(), node_path.clone()));
+                }
+            }
+        }
+    }
+
+    for (script, claims) in &p.script_node_paths {
+        let hosts = match attached.get(script) {
+            Some(h) if !h.is_empty() => h.clone(),
+            _ => continue,
+        };
+        for (line, claim) in claims {
+            let mut judged = 0usize;
+            let mut missing = 0usize;
+            let mut example = String::new();
+            for (scene_res, node_path) in &hosts {
+                let tree = resolver.tree(scene_res);
+                if tree.unresolved {
+                    continue;
+                }
+                let absolute = if node_path == "." {
+                    claim.clone()
+                } else {
+                    format!("{}/{}", node_path, claim)
+                };
+                if !judgeable(&absolute) {
+                    continue;
+                }
+                judged += 1;
+                if tree.is_missing(&absolute) && !built_at_runtime(p, &tree, &absolute) {
+                    missing += 1;
+                    if example.is_empty() {
+                        example = scene_res.clone();
+                    }
+                }
+            }
+            if judged > 0 && missing == judged {
+                let where_ = if hosts.len() == 1 {
+                    format!("{} does not contain it", example)
+                } else {
+                    format!("none of the {} scenes that attach this script contain it", hosts.len())
+                };
+                out.push(Finding {
+                    project: String::new(),
+                    check: "missing-node-path",
+                    level: Level::Error,
+                    file: script.clone(),
+                    line: *line,
+                    message: format!("$\"{}\" is not a node in the scene this script runs in", claim),
+                    evidence: format!(
+                        "{}; the engine returns null for a path it cannot find, so the next line fails at run time",
+                        where_
+                    ),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Could the first missing segment of `path` be a node some script creates?
+///
+/// `$Dokunmatik/Aletler` in a shipped game is not a bug: the scene has
+/// `Dokunmatik`, and `Aletler` is a `VBoxContainer` built in `_ready` with
+/// `alet.name = "Aletler"` and added under it. Nothing in the files can prove
+/// that node is absent, so the tool must not say it is.
+fn built_at_runtime(p: &Project, tree: &crate::scene::Tree, path: &str) -> bool {
+    let parts: Vec<&str> = path.split('/').collect();
+    let mut prefix = String::new();
+    for part in parts {
+        prefix = if prefix.is_empty() { part.to_string() } else { format!("{}/{}", prefix, part) };
+        if tree.is_missing(&prefix) {
+            return p.runtime_node_names.contains(part);
+        }
+    }
+    false
 }
 
 fn origin(r: &crate::project::Reference) -> String {

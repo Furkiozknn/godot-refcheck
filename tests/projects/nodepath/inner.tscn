@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://cnpinneraaaaaa"]
+
+[node name="Inner" type="Control"]
+
+[node name="Deep" type="Button" parent="."]
+text = "deep"

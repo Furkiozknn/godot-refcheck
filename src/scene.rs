@@ -148,6 +148,11 @@ pub struct SceneFile {
     pub nodes: Vec<NodeDecl>,
     pub connections: Vec<ConnDecl>,
     pub ext: BTreeMap<String, ExtTarget>,
+    /// node path (relative to the scene root, root is ".") -> the
+    /// `ExtResource` id of the script attached to it. Needed to answer "which
+    /// scene is this script's `$Head/Body` written against", which is the
+    /// only way a path inside a script can be resolved at all.
+    pub scripts: BTreeMap<String, String>,
 }
 
 impl SceneFile {

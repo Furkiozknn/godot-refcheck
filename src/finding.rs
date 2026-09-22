@@ -103,6 +103,11 @@ pub const CHECKS: &[CheckInfo] = &[
         summary: "a signal connection points at a node the scene does not contain",
     },
     CheckInfo {
+        id: "missing-node-path",
+        level: Level::Error,
+        summary: "a script reaches for $Node/Path that the scene it runs in does not contain",
+    },
+    CheckInfo {
         id: "duplicate-class-name",
         level: Level::Error,
         summary: "two scripts declare the same global class_name",

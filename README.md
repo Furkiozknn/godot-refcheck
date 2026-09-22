@@ -63,10 +63,37 @@ moved.tres:3: warning: uid-path-mismatch: uid://cpresentaaaaaa resolves to res:/
 | `duplicate-uid` | error | two files claim the same `uid://`, so the engine may hand out the wrong one |
 | `undeclared-id` | error | a scene uses `ExtResource("3")` or `SubResource("x")` that the file never declares |
 | `broken-connection` | error | a signal is connected from or to a node the scene does not contain; the engine drops such a connection without a word, so the callback simply stops arriving |
+| `missing-node-path` | error | a script reaches for `$Head/Body` (or `get_node("Head/Body")`) that the scene it runs in does not contain; the engine hands back `null` and the next line dies at run time, on whichever branch gets there first |
 | `duplicate-class-name` | error | two scripts declare the same global `class_name` |
 | `uid-path-mismatch` | warning | the `uid://` and the path in one reference point at different files; the engine follows the uid and ignores the path you read |
 | `stale-import` | warning | a `.import` file left behind by an asset that was deleted or renamed |
 | `unused-asset` | note | nothing in the project appears to reference this asset (opt-in, advisory) |
+
+`missing-node-path` exists because most projects do not connect signals in the
+editor at all. The four games in this ecosystem have **no** `[connection]`
+blocks and 145 `.connect(` call sites in GDScript, so the resolver that judges
+a connection's `to=` was pointed at a file section they never write. `$Head/Body`
+is the same claim in the place it is actually made.
+
+It is quiet by construction, and each rule below is there because leaving it
+out produced findings on code that ships:
+
+- A script no scene attaches is skipped. An autoload or a `RefCounted` helper
+  has no tree to be judged against.
+- A script attached to several scenes is reported only if the path is missing
+  in **every** one of them.
+- The path resolves from the node the script is attached to, not from the
+  scene root: `$Sprite` on a child means that child's `Sprite`.
+- `oyun.get_node("Dunya/Oyuncu")` asks another node and is ignored. Counting
+  it produced 132 findings on one shipped game — all of them a headless test
+  harness reaching into a scene it had just instantiated.
+- A node some script names at run time (`alet.name = "Aletler"` then
+  `add_child`) is never called missing. That was the last false positive left
+  across five real projects, and it was in a game that works.
+
+Across the five Godot projects on this account — 850-odd files — it reports
+nothing. That is the result it should give on code that runs; the fixture
+under `tests/projects/nodepath` is where it is proved to bite.
 
 References are collected from `.tscn`, `.tres`, `.escn`, `project.godot`,
 `.import`, `plugin.cfg`, `.gd`/`.cs` (`preload()` and `load()` with a literal
@@ -253,8 +280,16 @@ tests, because each of them once produced a false finding here.
 
 ## Limitations
 
-- A path built at run time (`load("res://levels/" + name + ".tscn")`) cannot be
-  resolved statically and is deliberately ignored rather than guessed at.
+- A path built at run time (`load("res://levels/" + name + ".tscn")`,
+  `get_node("lvl" + n)`) cannot be resolved statically and is deliberately
+  ignored rather than guessed at.
+- A node created with `add_child` at run time is in no scene file. If some
+  script names it (`n.name = "Aletler"`), `missing-node-path` stays silent
+  about paths reaching that name anywhere in the project — which is coarse,
+  and deliberately so: a false error in a tool like this costs more than a
+  missed one.
+- `$"quoted"` and `%UniqueName` are not judged: the first can hold anything,
+  and the second is resolved by owner rather than by path.
 - `unused-asset` is advisory and off by default: an asset reached only through a
   computed path looks unused to any static tool. Scripts are never reported,
   because a `class_name` can be used with no `res://` reference at all.
@@ -268,7 +303,7 @@ tests, because each of them once produced a false finding here.
 ## Development
 
 ```sh
-cargo test                                   # 107 tests, no network
+cargo test                                   # 128 tests, no network
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 python3 tools/verify_with_godot.py --download

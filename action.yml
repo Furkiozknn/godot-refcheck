@@ -153,18 +153,33 @@ runs:
           args="$args --baseline ${{ inputs.baseline }}"
         fi
 
-        # One pass that never fails, so the counts and the summary are always produced.
+        # Two passes, both of which refuse to fail: the text one is what a
+        # person reads in the step summary, the JSON one is what the counts
+        # come from. The counts used to be scraped out of the text, which
+        # worked only when there was something to report - a single clean
+        # project prints "no problems found." and no counts line at all, so
+        # the grep matched nothing and, under `bash -e`, took the whole step
+        # down. The action failed precisely on the projects it had nothing
+        # to say about. A scan is milliseconds; a second pass is cheaper
+        # than guessing at prose.
         report="${RUNNER_TEMP}/godot-refcheck-report.txt"
+        machine="${RUNNER_TEMP}/godot-refcheck-report.json"
         # shellcheck disable=SC2086
         "$binary" '${{ inputs.path }}' $args --fail-on never | tee "$report"
-        summary="$(tail -n 2 "$report" | tr -d '\r' | grep -E 'errors,' | tail -n 1)"
-        errors="$(echo "$summary"   | sed -n 's/.*: \([0-9]*\) errors.*/\1/p')"
-        warnings="$(echo "$summary" | sed -n 's/.*, \([0-9]*\) warnings.*/\1/p')"
-        notes="$(echo "$summary"    | sed -n 's/.*, \([0-9]*\) notes.*/\1/p')"
+        # shellcheck disable=SC2086
+        "$binary" '${{ inputs.path }}' $args --json --fail-on never > "$machine"
+        counts="$(python3 - "$machine" <<'PY'
+        import json, sys
+        d = json.load(open(sys.argv[1], encoding="utf-8"))
+        f = d.get("findings") or []
+        n = lambda lvl: sum(1 for x in f if x.get("level") == lvl)
+        print(n("error"), n("warning"), n("info"), len(d.get("repairs") or []))
+        PY
+        )"
+        read -r errors warnings notes repaired <<< "$counts"
         errors="${errors:-0}"; warnings="${warnings:-0}"; notes="${notes:-0}"
-        total=$((errors + warnings + notes))
-        repaired="$(grep -cE '^  .* -> ' "$report" || true)"
         repaired="${repaired:-0}"
+        total=$((errors + warnings + notes))
         {
           echo "errors=$errors"
           echo "warnings=$warnings"

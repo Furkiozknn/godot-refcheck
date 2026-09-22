@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **The GitHub Action failed on projects with no findings.** The step read its
+  counts out of the human-readable summary, and a single clean project does not
+  print one — it prints "no problems found." The `grep` matched nothing, and
+  under the runner's `bash -e` that took the whole step down with exit 1. The
+  action worked on repositories that had something wrong with them and failed on
+  the ones that did not, which is the wrong way round. Counts now come from
+  `--json`, which always carries them.
+
+  It shipped because the action's CI job only ever ran one shape: several
+  projects at once, findings present, `fail-on: never`. `tools/action_smoke.py`
+  now runs the action's own shell, with the runner's exact flags, across clean
+  and broken fixtures at every `fail-on` level, and a second CI job runs the
+  real action against a clean project. Against the old `action.yml` that gate
+  fails on the first three cases.
+
 ## 0.2.0
 
 From a checker into something that also repairs, and two checks for breakage the

@@ -81,6 +81,39 @@ jobs:
             exit 1
           fi
 
+  # The job above exercises one shape: many projects, findings present,
+  # fail-on never. That is the shape that worked. A single project with
+  # nothing wrong with it was never run, and that is the one that failed -
+  # the counts were scraped out of prose a clean run does not print, so the
+  # step died under `bash -e` on exactly the repositories it had nothing to
+  # say about. This job runs the action's own shell against every shape.
+  action-shapes:
+    name: the action survives a project with nothing wrong
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - run: cargo build --release
+      - name: Clean, broken, and every fail-on level
+        run: python3 tools/action_smoke.py
+
+      # A clean project through the real action, not a simulation of it.
+      - id: clean
+        uses: ./
+        with:
+          path: tests/projects/clean
+          fail-on: error
+      - name: A clean project reports zero and passes
+        run: |
+          set -eu
+          test "${{ steps.clean.outputs.errors }}" = "0"
+          test "${{ steps.clean.outputs.warnings }}" = "0"
+          test "${{ steps.clean.outputs.findings }}" = "0"
+          echo "clean project: 0 findings, step green"
+
   oracle:
     name: agree with the engine
     runs-on: ubuntu-latest

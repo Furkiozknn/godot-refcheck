@@ -233,9 +233,6 @@ def main():
         if not ok:
             failures.append(f"{name}: engine={errors[:2]} refcheck={[f['check'] for f in ours]}")
 
-    if tmp:
-        shutil.rmtree(tmp, ignore_errors=True)
-
     print()
     for name, (check, count) in sorted(SILENT_CASES.items()):
         errors = engine_errors(engine_output[name])
@@ -274,6 +271,9 @@ def main():
             failures.append(
                 f"real project: broken={len(broken)} left={[f['check'] for f in left]} engine={errors[:2]}"
             )
+
+    if tmp:
+        shutil.rmtree(tmp, ignore_errors=True)
 
     print()
     if failures:

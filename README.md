@@ -278,3 +278,14 @@ python3 tools/corpus.py
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+## More from this ecosystem
+
+- **[repo-vet](https://github.com/Furkiozknn/repo-vet)** — checks what a README promises against what is actually there
+- **[mcp-vet](https://github.com/Furkiozknn/mcp-vet)** — audits an MCP server's source before you install it
+- **[godot-2d-sablon](https://github.com/Furkiozknn/godot-2d-sablon)** — two Godot 4 starters whose jump feel was measured
+- **[yercekimi-cevir](https://github.com/Furkiozknn/yercekimi-cevir)** — no jump button — one key flips gravity
+
+<sub>All of them in one searchable page: **[furkiozknn.github.io](https://furkiozknn.github.io/)** — each card is generated from that repository's own <code>project-meta.json</code>.</sub>

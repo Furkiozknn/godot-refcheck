@@ -18,10 +18,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: cargo build --release
-      - name: Scan the corpus
+      # --expect is what makes this a gate. Without it the job printed a
+      # table and always went green: a change that started reporting false
+      # findings across 237 third-party projects would have been invisible
+      # unless someone opened the summary and read it.
+      - name: Scan the corpus, and agree with what docs/corpus.md documents
         run: |
           set -eo pipefail
-          python3 tools/corpus.py | tee corpus.txt
+          python3 tools/corpus.py --expect docs/corpus.md | tee corpus.txt
       - name: Break a real project and repair it again
         run: |
           set -eo pipefail

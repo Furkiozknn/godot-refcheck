@@ -281,7 +281,10 @@ real repositories — 237 projects, 19,305 files, 6,904 references, 2,741 signal
 connections and 880 `class_name` declarations. It reports 50 findings in total,
 every one of them checked by hand and real; nothing else in those projects
 produces a finding, and `--fix-dry-run` proposes no change anywhere in them.
-[docs/corpus.md](docs/corpus.md) lists each one. Shapes that look broken and are
+[docs/corpus.md](docs/corpus.md) lists each one, and the weekly `Corpus`
+workflow runs `--expect docs/corpus.md`, so the job goes red the moment the
+corpus stops agreeing with what is written down — it used to print the table
+and pass whatever it found. Shapes that look broken and are
 not — a connection into an instanced or inherited scene, locale-suffixed
 translation remaps, translations generated from a `.csv` at import time, the
 dead `[locale]` block Godot 3 leaves behind,

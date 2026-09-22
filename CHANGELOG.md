@@ -30,6 +30,12 @@
 
 - 107 -> 133 tests. Corpus findings 41 -> 50, all nine new ones real.
 
+- The weekly `Corpus` job is a gate now. It printed a table and passed
+  whatever it found, so a change that started reporting false findings across
+  237 third-party projects could not have turned it red. `tools/corpus.py
+  --expect docs/corpus.md` reads the expected total out of the document
+  itself, so the gate and the published number cannot drift apart.
+
 ## 0.2.0
 
 From a checker into something that also repairs, and two checks for breakage the

@@ -48,6 +48,14 @@ def main():
     ap.add_argument("--cache", default=os.path.join(ROOT, "target", "corpus"))
     ap.add_argument("--list", default=os.path.join(ROOT, "tools", "corpus.txt"))
     ap.add_argument("--binary", default=os.path.join(ROOT, "target", "release", "godot-refcheck"))
+    ap.add_argument(
+        "--expect",
+        metavar="DOC",
+        default=None,
+        help="docs/corpus.md: fail unless the run agrees with its total row. "
+        "Without it this script only prints, and a weekly job that only "
+        "prints cannot go red when the corpus starts disagreeing.",
+    )
     args = ap.parse_args()
 
     if not os.path.exists(args.binary):
@@ -90,7 +98,42 @@ def main():
     for f in findings:
         print(f"  {f['level']:<7} {f['check']:<17} {f['repo']}  {f['located']}:{f['line']}")
         print(f"          {f['message']}")
+
+    if args.expect:
+        want = documented_total(args.expect)
+        if want is None:
+            print(f"\ncannot read a total out of {args.expect}")
+            return 2
+        if want != len(findings):
+            print(
+                f"\n{args.expect} documents {want} findings; this run reports "
+                f"{len(findings)}.\nEvery finding in the corpus has to be a real "
+                "defect that was checked by hand. Confirm each new one, then "
+                f"update {args.expect}."
+            )
+            return 1
+        print(f"agrees with {args.expect}: {want} findings")
     return 0
+
+
+def documented_total(path):
+    """The findings count out of the `**total**` row in docs/corpus.md.
+
+    The gate reads the number from the document rather than carrying its own
+    copy, so the two cannot drift apart: changing one without the other is
+    what makes a published number quietly wrong.
+    """
+    import re
+
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if "**total**" not in line:
+                continue
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            m = re.fullmatch(r"\*\*([\d,]+)\*\*", cells[-1])
+            if m:
+                return int(m.group(1).replace(",", ""))
+    return None
 
 
 if __name__ == "__main__":

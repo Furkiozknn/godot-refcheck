@@ -1,0 +1,33 @@
+name: Corpus
+
+# The corpus clones real Godot repositories, so it runs on demand and once a
+# week rather than on every push. A finding that appears here is either a real
+# defect upstream or a false positive that has to be fixed.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "40 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo build --release
+      - name: Scan the corpus
+        run: |
+          set -eo pipefail
+          python3 tools/corpus.py | tee corpus.txt
+      - name: Publish the table
+        run: |
+          {
+            echo "### Corpus"
+            echo ""
+            echo '```'
+            cat corpus.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

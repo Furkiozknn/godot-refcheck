@@ -1,0 +1,12 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://clinescsvaaaa"
+
+[deps]
+
+files=["res://sfx/lines.en.translation"]
+
+source_file="res://sfx/lines.csv"
+dest_files=["res://sfx/lines.en.translation"]

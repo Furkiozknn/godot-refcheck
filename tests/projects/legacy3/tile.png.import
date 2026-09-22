@@ -1,0 +1,10 @@
+[remap]
+
+importer="texture"
+type="StreamTexture"
+path="res://.import/tile.png-dddddddddddddddddddddddddddddddd.stex"
+
+[deps]
+
+source_file="res://tile.png"
+dest_files=[ "res://.import/tile.png-dddddddddddddddddddddddddddddddd.stex" ]

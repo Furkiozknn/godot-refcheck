@@ -1,0 +1,14 @@
+[remap]
+
+importer="wav"
+type="AudioStreamWAV"
+uid="uid://chello_traaaa"
+
+[deps]
+
+source_file="res://sfx/hello_tr.wav"
+dest_files=["res://.godot/imported/hello_tr.wav-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.sample"]
+
+[params]
+
+edit/loop_mode=0

@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build binaries for.
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,     target: x86_64-unknown-linux-gnu,  ext: tar.gz }
+          - { os: ubuntu-24.04-arm,  target: aarch64-unknown-linux-gnu, ext: tar.gz }
+          - { os: macos-13,          target: x86_64-apple-darwin,       ext: tar.gz }
+          - { os: macos-latest,      target: aarch64-apple-darwin,      ext: tar.gz }
+          - { os: windows-latest,    target: x86_64-pc-windows-msvc,    ext: zip }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Tests have to pass on the platform we ship
+        run: cargo test --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          set -eu
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          name="godot-refcheck-${tag}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          if [ "${{ matrix.ext }}" = "zip" ]; then
+            cp "target/${{ matrix.target }}/release/godot-refcheck.exe" "dist/$name/"
+          else
+            cp "target/${{ matrix.target }}/release/godot-refcheck" "dist/$name/"
+          fi
+          cp README.md LICENSE CHANGELOG.md "dist/$name/"
+          cd dist/"$name"
+          if [ "${{ matrix.ext }}" = "zip" ]; then
+            7z a "../$name.zip" ./*
+          else
+            tar -czf "../$name.tar.gz" ./*
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*.${{ matrix.ext }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum ./*.tar.gz ./*.zip > SHA256SUMS
+          cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
+          body_path: CHANGELOG.md
+          fail_on_unmatched_files: true

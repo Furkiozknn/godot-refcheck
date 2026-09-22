@@ -1,0 +1,29 @@
+config_version=5
+
+[application]
+
+config/name="tricky"
+run/main_scene="res://level.tscn"
+config/features=PackedStringArray("4.4")
+
+[internationalization]
+
+locale/translations=PackedStringArray("res://sfx/lines.en.translation")
+locale/translation_remaps={
+"res://sfx/hello_en.wav": PackedStringArray("res://sfx/hello_tr.wav:tr")
+}
+
+[locale]
+
+translations=PackedStringArray("res://OldFolder/gone.translation")
+translation_remaps={
+"res://OldFolder/gone.wav": PackedStringArray("res://OldFolder/also_gone.wav:tr")
+}
+
+[replication]
+
+config={
+"uid://cnolongerthere": {
+"replicated": true
+}
+}

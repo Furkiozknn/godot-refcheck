@@ -1,0 +1,10 @@
+[remap]
+
+importer="texture"
+type="CompressedTexture2D"
+uid="uid://cpresentaaaaaa"
+
+[deps]
+
+source_file="res://art/present.png"
+dest_files=["res://.godot/imported/present.png-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ctex"]

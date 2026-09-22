@@ -1,0 +1,14 @@
+# Real Godot repositories used to calibrate the checks.
+# Format: owner/repo [branch]
+# Run: python3 tools/corpus.py
+godotengine/godot-demo-projects
+godotengine/godot-demo-projects 3.x
+godotengine/godot-benchmarks
+Orama-Interactive/Pixelorama
+RodZill4/material-maker
+mbrlabs/Lorien
+GDQuest/godot-open-rpg
+Maaack/godot-game-template
+Maaack/Godot-Menus-Template
+MakovWait/godots
+bitbrain/beehave

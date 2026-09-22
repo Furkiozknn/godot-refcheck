@@ -1,0 +1,23 @@
+config_version=5
+
+[application]
+
+config/name="clean"
+run/main_scene="uid://cscenemainaaaa"
+config/icon="res://icon.svg"
+config/features=PackedStringArray("4.4", "Forward Plus")
+
+[autoload]
+
+Settings="*res://main.gd"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/demo/plugin.cfg")
+
+[internationalization]
+
+locale/translations=PackedStringArray("res://translations/text.en.translation")
+locale/translation_remaps={
+"res://icon.svg": PackedStringArray("res://icon.svg:tr")
+}

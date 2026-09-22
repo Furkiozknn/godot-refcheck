@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0.0",
+  "id": "godot-refcheck",
+  "owner": "Furkiozknn",
+  "repository": "https://github.com/Furkiozknn/godot-refcheck",
+  "homepage": null,
+  "releases": "https://github.com/Furkiozknn/godot-refcheck/releases",
+  "status": "active",
+  "category": "developer-tool",
+  "platform": [
+    "cli",
+    "github-action"
+  ],
+  "primary_language": "Rust",
+  "technologies": [
+    "Rust (std only)",
+    "zero dependencies",
+    "SARIF 2.1.0",
+    "GitHub Actions"
+  ],
+  "version": "0.1.0",
+  "license": "MIT",
+  "topics": [
+    "ci",
+    "gamedev",
+    "godot",
+    "godot-engine",
+    "godot4",
+    "linter",
+    "rust",
+    "sarif",
+    "static-analysis",
+    "zero-dependency"
+  ],
+  "summary": "Godot tells you a resource reference is broken only when that scene loads - often in an exported build on someone else's machine. godot-refcheck reads the project files directly and reports every reference the engine could not satisfy: missing paths, case-only differences that break outside Windows, unknown and duplicated uid://, undeclared ExtResource ids and leftover .import metadata. One binary, no dependencies, Godot 3 and 4.",
+  "key_features": [
+    "Eight checks over .tscn, .tres, project.godot, .import, plugin.cfg, GDScript and shaders, in both the Godot 3 and Godot 4 formats",
+    "Every check is compared with a real headless Godot by tools/verify_with_godot.py; six have a matching engine message and the other two are documented as static-only",
+    "Calibrated against 237 projects in eleven real repositories: 25 findings, each confirmed by hand, and nothing else reported",
+    "Text, JSON and SARIF 2.1.0 output, plus a composite GitHub Action that puts findings on the changed lines of a pull request"
+  ],
+  "media": {
+    "hero": "assets/banner.svg",
+    "screenshots": [],
+    "gifs": [],
+    "videos": []
+  },
+  "tests": {
+    "count": 73,
+    "source": "`=== 73 tests passed ===`",
+    "measured": "2026-09-22"
+  },
+  "ci": {
+    "workflows": [
+      "ci.yml",
+      "corpus.yml",
+      "release.yml"
+    ],
+    "badge": "https://github.com/Furkiozknn/godot-refcheck/actions/workflows/ci.yml/badge.svg"
+  },
+  "docs": {
+    "readme": "README.md",
+    "changelog": "CHANGELOG.md",
+    "version_history": null,
+    "roadmap": null,
+    "security": null,
+    "contributing": null,
+    "license_file": "LICENSE"
+  },
+  "social": {
+    "headline": "Godot only tells you a reference is broken when that scene loads. godot-refcheck tells you at commit time.",
+    "hashtags": [
+      "godot",
+      "gamedev",
+      "rust",
+      "staticanalysis"
+    ],
+    "primary_link": "https://github.com/Furkiozknn/godot-refcheck"
+  },
+  "provenance": {
+    "generated_at": "2026-09-22",
+    "generator": "hand-written",
+    "rule": "mechanical fields read from the repository; counts taken from a run recorded in CI; no field is generated from a guess"
+  }
+}

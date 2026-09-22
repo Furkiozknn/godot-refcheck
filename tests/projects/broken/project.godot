@@ -1,0 +1,12 @@
+config_version=5
+
+[application]
+
+config/name="broken"
+run/main_scene="res://main.tscn"
+config/icon="uid://cnobodyhasthisu"
+config/features=PackedStringArray("4.4")
+
+[autoload]
+
+Gone="*res://missing_autoload.gd"

@@ -1,0 +1,164 @@
+name: godot-refcheck
+description: Find broken resource references, UID problems and dead assets in a Godot project.
+author: Furkiozknn
+branding:
+  icon: link-2
+  color: blue
+
+inputs:
+  path:
+    description: Project directory, a project.godot file, or a directory of projects with recursive.
+    required: false
+    default: "."
+  recursive:
+    description: Scan every project.godot found under path.
+    required: false
+    default: "false"
+  unused:
+    description: Also report assets nothing appears to reference.
+    required: false
+    default: "false"
+  only:
+    description: Comma separated list of checks to run on their own.
+    required: false
+    default: ""
+  skip:
+    description: Comma separated list of checks to skip.
+    required: false
+    default: ""
+  fail-on:
+    description: "Fail the step at this level or above: error, warning, info, never."
+    required: false
+    default: "error"
+  sarif:
+    description: Write a SARIF 2.1.0 report to this file.
+    required: false
+    default: ""
+  version:
+    description: Release to use. Defaults to the version of the action itself.
+    required: false
+    default: ""
+
+outputs:
+  errors:
+    description: Number of findings at error level.
+    value: ${{ steps.run.outputs.errors }}
+  warnings:
+    description: Number of findings at warning level.
+    value: ${{ steps.run.outputs.warnings }}
+  notes:
+    description: Number of findings at note level.
+    value: ${{ steps.run.outputs.notes }}
+  findings:
+    description: Total number of findings.
+    value: ${{ steps.run.outputs.findings }}
+
+runs:
+  using: composite
+  steps:
+    - id: install
+      shell: bash
+      run: |
+        set -eu
+        version="${{ inputs.version }}"
+        if [ -z "$version" ]; then
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$GITHUB_ACTION_PATH/Cargo.toml" | head -n 1)"
+        fi
+        case "${RUNNER_OS}-${RUNNER_ARCH}" in
+          Linux-X64)   target="x86_64-unknown-linux-gnu"; ext="tar.gz" ;;
+          Linux-ARM64) target="aarch64-unknown-linux-gnu"; ext="tar.gz" ;;
+          macOS-X64)   target="x86_64-apple-darwin"; ext="tar.gz" ;;
+          macOS-ARM64) target="aarch64-apple-darwin"; ext="tar.gz" ;;
+          Windows-X64) target="x86_64-pc-windows-msvc"; ext="zip" ;;
+          *)           target=""; ext="" ;;
+        esac
+        dir="${RUNNER_TEMP}/godot-refcheck"
+        mkdir -p "$dir"
+        binary="$dir/godot-refcheck"
+        if [ "${RUNNER_OS}" = "Windows" ]; then
+          binary="$dir/godot-refcheck.exe"
+        fi
+        ok="no"
+        if [ -n "$target" ]; then
+          asset="godot-refcheck-v${version}-${target}.${ext}"
+          url="https://github.com/Furkiozknn/godot-refcheck/releases/download/v${version}/${asset}"
+          echo "trying $url"
+          if curl -fsSL -o "$dir/$asset" "$url"; then
+            if [ "$ext" = "zip" ]; then
+              unzip -o -q "$dir/$asset" -d "$dir"
+            else
+              tar -xzf "$dir/$asset" -C "$dir"
+            fi
+            if [ -f "$binary" ]; then
+              chmod +x "$binary"
+              ok="yes"
+            fi
+          fi
+        fi
+        if [ "$ok" = "no" ]; then
+          echo "no published binary for ${RUNNER_OS}-${RUNNER_ARCH} at v${version}; building from source"
+          cargo build --release --manifest-path "$GITHUB_ACTION_PATH/Cargo.toml"
+          built="$GITHUB_ACTION_PATH/target/release/godot-refcheck"
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            built="$GITHUB_ACTION_PATH/target/release/godot-refcheck.exe"
+          fi
+          cp "$built" "$binary"
+        fi
+        "$binary" --version
+        echo "binary=$binary" >> "$GITHUB_OUTPUT"
+
+    - id: run
+      shell: bash
+      run: |
+        set -u
+        binary='${{ steps.install.outputs.binary }}'
+        args=""
+        if [ '${{ inputs.recursive }}' = 'true' ]; then
+          args="$args --recursive"
+        fi
+        if [ '${{ inputs.unused }}' = 'true' ]; then
+          args="$args --unused"
+        fi
+        if [ -n '${{ inputs.only }}' ]; then
+          args="$args --only ${{ inputs.only }}"
+        fi
+        if [ -n '${{ inputs.skip }}' ]; then
+          args="$args --skip ${{ inputs.skip }}"
+        fi
+        if [ -n '${{ inputs.sarif }}' ]; then
+          args="$args --sarif ${{ inputs.sarif }}"
+        fi
+
+        # One pass that never fails, so the counts and the summary are always produced.
+        report="${RUNNER_TEMP}/godot-refcheck-report.txt"
+        # shellcheck disable=SC2086
+        "$binary" '${{ inputs.path }}' $args --fail-on never | tee "$report"
+        summary="$(tail -n 2 "$report" | tr -d '\r' | grep -E 'errors,' | tail -n 1)"
+        errors="$(echo "$summary"   | sed -n 's/.*: \([0-9]*\) errors.*/\1/p')"
+        warnings="$(echo "$summary" | sed -n 's/.*, \([0-9]*\) warnings.*/\1/p')"
+        notes="$(echo "$summary"    | sed -n 's/.*, \([0-9]*\) notes.*/\1/p')"
+        errors="${errors:-0}"; warnings="${warnings:-0}"; notes="${notes:-0}"
+        total=$((errors + warnings + notes))
+        {
+          echo "errors=$errors"
+          echo "warnings=$warnings"
+          echo "notes=$notes"
+          echo "findings=$total"
+        } >> "$GITHUB_OUTPUT"
+        {
+          echo "### godot-refcheck"
+          echo ""
+          echo "$errors errors, $warnings warnings, $notes notes."
+          echo ""
+          echo '```'
+          cat "$report"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        case '${{ inputs.fail-on }}' in
+          never) exit 0 ;;
+          info)  if [ "$total" -gt 0 ]; then exit 1; fi ;;
+          warning) if [ $((errors + warnings)) -gt 0 ]; then exit 1; fi ;;
+          *)     if [ "$errors" -gt 0 ]; then exit 1; fi ;;
+        esac
+        exit 0

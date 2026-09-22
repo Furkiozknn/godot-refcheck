@@ -1,0 +1,10 @@
+[remap]
+
+importer="texture"
+type="CompressedTexture2D"
+uid="uid://ctiletrickyaaa"
+
+[deps]
+
+source_file="res://art/tile.png"
+dest_files=["res://.godot/imported/tile.png-ffffffffffffffffffffffffffffffff.ctex"]

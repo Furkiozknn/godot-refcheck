@@ -1,0 +1,6 @@
+[gd_resource type="Resource" format=3 uid="uid://cmovedresaaaaa"]
+
+[ext_resource type="Texture2D" uid="uid://cpresentaaaaaa" path="res://art/old_name.png" id="1"]
+
+[resource]
+icon = ExtResource("1")

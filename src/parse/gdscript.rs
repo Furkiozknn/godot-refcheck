@@ -148,6 +148,47 @@ pub fn shader_includes(src: &str) -> Vec<(usize, String)> {
     out
 }
 
+/// `class_name X` declared at the top level of a script.
+pub fn class_name(src: &str) -> Option<(usize, String)> {
+    let toks = lex(src);
+    for w in toks.windows(2) {
+        if let (Tok::Ident(kw), Tok::Ident(name)) = (&w[0], &w[1]) {
+            if kw == "class_name" {
+                return Some((0, name.clone()));
+            }
+        }
+    }
+    None
+}
+
+/// `extends "res://base.gd"`. A bare `extends Node` names a type, not a file.
+pub fn extends_path(src: &str) -> Option<(usize, String)> {
+    let toks = lex(src);
+    for w in toks.windows(2) {
+        if let (Tok::Ident(kw), Tok::Str { value, offset }) = (&w[0], &w[1]) {
+            if kw == "extends" {
+                return Some((*offset, value.clone()));
+            }
+        }
+    }
+    None
+}
+
+/// `@icon("res://…")` above a class declaration.
+pub fn icon_annotation(src: &str) -> Option<(usize, String)> {
+    let toks = lex(src);
+    for w in toks.windows(4) {
+        if let (Tok::Punct('@'), Tok::Ident(name), Tok::Punct('('), Tok::Str { value, offset }) =
+            (&w[0], &w[1], &w[2], &w[3])
+        {
+            if name == "icon" {
+                return Some((*offset, value.clone()));
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,5 +272,36 @@ mod tests {
     fn escape_sequences_do_not_end_a_string_early() {
         let v = resource_loads("var s = \"a\\\"b\"\nvar a = preload(\"res://a.tscn\")\n");
         assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn class_name_is_read() {
+        assert_eq!(class_name("extends Node\nclass_name Hero\n").unwrap().1, "Hero");
+        assert_eq!(class_name("class_name Hero extends Node\n").unwrap().1, "Hero");
+        assert!(class_name("extends Node\n").is_none());
+    }
+
+    #[test]
+    fn an_inner_class_is_not_a_global_class_name() {
+        assert!(class_name("extends Node\nclass Inner:\n\tpass\n").is_none());
+    }
+
+    #[test]
+    fn class_name_inside_a_string_or_comment_is_not_a_declaration() {
+        assert!(class_name("# class_name Hero\n").is_none());
+        assert!(class_name("var s = \"class_name Hero\"\n").is_none());
+    }
+
+    #[test]
+    fn extends_with_a_path_is_a_file_reference() {
+        assert_eq!(extends_path("extends \"res://base.gd\"\n").unwrap().1, "res://base.gd");
+        assert!(extends_path("extends CharacterBody2D\n").is_none());
+    }
+
+    #[test]
+    fn icon_annotation_is_a_file_reference() {
+        let v = icon_annotation("@icon(\"res://icons/hero.svg\")\nextends Node\n").unwrap();
+        assert_eq!(v.1, "res://icons/hero.svg");
+        assert!(icon_annotation("@export var x: int\n").is_none());
     }
 }

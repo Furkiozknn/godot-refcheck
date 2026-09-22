@@ -1,0 +1,10 @@
+[remap]
+
+importer="texture"
+type="CompressedTexture2D"
+uid="uid://cwallaaaaaaaaa"
+
+[deps]
+
+source_file="res://art/tiles/wall.png"
+dest_files=["res://.godot/imported/x-cwallaaaaaaaaa.ctex"]

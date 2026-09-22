@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://cconnbaseaaaaa"]
+
+[node name="Base" type="Control"]
+
+[node name="FromBase" type="Button" parent="."]
+text = "base"

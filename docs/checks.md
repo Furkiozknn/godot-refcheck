@@ -60,6 +60,38 @@ edits and bad merges produce this.
 The engine reports it only when that scene is loaded, which is why a static pass
 is worth having.
 
+## `broken-connection` (error)
+
+A `[connection]` names a node in `from` or `to` that the scene does not contain.
+
+The engine's answer: none. It drops a connection whose node it cannot resolve
+and says nothing, so the button still looks wired in the editor file and the
+callback never runs. That silence is the reason to look for it statically.
+
+Node paths are resolved through the whole scene graph: nodes that come from an
+instanced sub-scene, from a scene this one inherits from, or from a sub-scene
+inside one of those, all count as present. An `instance_placeholder` subtree is
+left alone entirely, because its contents only exist at run time.
+
+Quiet when: any scene in the chain cannot be read, the reference uses a `%`
+unique name or a `..` step, or the node lives under a placeholder. Nothing is
+reported rather than guessed.
+
+Whether the connected *method* exists is deliberately not checked. A signal may
+be wired to a built-in method — `queue_free`, `clear`, `set_h_offset` — and only
+the engine knows the full class API, so a static answer there would be wrong
+often enough to matter.
+
+## `duplicate-class-name` (error)
+
+Two scripts declare the same global `class_name`.
+
+The engine's answer: `Parse Error: Class "Hero" hides a global script class`,
+and the second script fails to load.
+
+Quiet when: the word appears in a comment or a string, or is used as an
+identifier — only a real top-level declaration counts.
+
 ## `uid-path-mismatch` (warning)
 
 One reference carries both a `uid://` and a path, and they resolve to different
@@ -85,3 +117,27 @@ name appears in any string literal in any script is treated as reachable.
 
 It is still advisory. An asset reached only through a computed path is invisible
 to every static tool, this one included.
+
+## Repairs
+
+`--fix` rewrites a reference only when the project itself settles what it should
+say. Three cases qualify:
+
+| finding | what makes the answer certain |
+| --- | --- |
+| `case-mismatch` | the file is on disk, spelled differently |
+| `uid-path-mismatch` | the `uid://` already resolves to a file, and the engine is loading that one |
+| `missing-resource` | exactly one file in the whole project carries that name |
+
+Everything else is reported and left alone. Two files with the same name give no
+single answer, so nothing is proposed. A path written with a locale suffix
+(`res://voice.wav:es`), a `..` step, or an `*` autoload prefix is skipped as
+well: the text in the file is not the path itself, and a blind substring swap
+there could damage a line it did not understand.
+
+A repair is a single-line, in-place edit of the exact text that was written. The
+rest of the file — ordering, spacing, line endings — is untouched, and nothing
+is ever deleted: a leftover `.import` file is reported, never removed.
+
+Against the eleven corpus repositories, 19,305 files in projects that work,
+`--fix-dry-run` proposes no change at all.

@@ -223,3 +223,110 @@ fn the_godot_cache_directory_is_never_scanned() {
     let p = Project::load(&project_dir("clean"));
     assert!(p.files.iter().all(|f| !f.starts_with("res://.godot/")));
 }
+
+// --- the scene graph -------------------------------------------------------
+
+/// A connection into an instanced scene, into a scene this one inherits from,
+/// or under a placeholder instance points at a node no line of this file
+/// mentions, and all three are perfectly healthy.
+#[test]
+fn connections_through_instances_and_inheritance_are_not_broken() {
+    let f = of(&scan("conn"), "broken-connection");
+    let lines: Vec<(String, usize)> = f.iter().map(|x| (x.file.clone(), x.line)).collect();
+    assert_eq!(
+        lines,
+        vec![("res://heir.tscn".to_string(), 11), ("res://level.tscn".to_string(), 25)]
+    );
+}
+
+#[test]
+fn a_connection_to_a_node_that_is_gone_is_reported_once_per_end() {
+    let f = of(&scan("conn"), "broken-connection");
+    assert!(f.iter().any(|x| x.message.contains("Panel/Gone")));
+    assert!(f.iter().all(|x| !x.message.contains("Panel/Inner")));
+}
+
+#[test]
+fn a_placeholder_subtree_is_never_judged() {
+    let f = of(&scan("conn"), "broken-connection");
+    assert!(f.iter().all(|x| !x.message.contains("Later/")));
+}
+
+#[test]
+fn the_node_tree_reaches_into_an_inherited_base() {
+    let p = Project::load(&project_dir("conn"));
+    let mut r = godot_refcheck::scene::Resolver::new(&p);
+    let t = r.tree("res://level.tscn");
+    for path in
+        ["Button", "Panel", "Panel/Inner", "Panel/Inner/Deep", "Heir/FromBase", "Heir/Added"]
+    {
+        assert!(t.paths.contains(path), "{} should be in the tree", path);
+    }
+    assert!(t.is_missing("Panel/Gone"));
+    assert!(!t.is_missing("Later/Anything"));
+}
+
+#[test]
+fn a_scene_whose_instance_cannot_be_read_is_not_judged() {
+    let p = Project::load(&project_dir("broken"));
+    let mut r = godot_refcheck::scene::Resolver::new(&p);
+    let t = r.tree("res://does_not_exist.tscn");
+    assert!(t.unresolved);
+    assert!(!t.is_missing("Anything"));
+}
+
+// --- scripts ---------------------------------------------------------------
+
+#[test]
+fn two_scripts_with_the_same_class_name_are_both_reported() {
+    let f = of(&scan("scripts"), "duplicate-class-name");
+    assert_eq!(f.len(), 2);
+    assert!(f.iter().all(|x| x.message.contains("Hero")));
+}
+
+#[test]
+fn a_super_class_path_that_does_not_exist_is_a_missing_resource() {
+    let f = of(&scan("scripts"), "missing-resource");
+    assert!(f.iter().any(|x| x.message.contains("res://no_such_base.gd")));
+}
+
+#[test]
+fn an_icon_annotation_is_a_reference() {
+    let p = Project::load(&project_dir("scripts"));
+    assert!(p.refs.iter().any(|r| r.path.as_deref() == Some("res://missing_icon.svg")));
+}
+
+// --- repairs ---------------------------------------------------------------
+
+#[test]
+fn a_moved_file_is_offered_in_the_finding_text() {
+    let f = of(&scan("moved"), "missing-resource");
+    assert!(f.iter().any(|x| x.evidence.contains("res://art/tiles/wall.png")));
+}
+
+#[test]
+fn every_repair_in_the_moved_project_can_be_proved() {
+    let p = Project::load(&project_dir("moved"));
+    let r = godot_refcheck::checks::repairs(&p, &Options::default());
+    assert_eq!(r.len(), 3);
+    assert!(r.iter().any(|x| x.new == "res://player.tscn"));
+    assert!(r.iter().any(|x| x.new == "res://art/tiles/wall.png"));
+    assert!(r.iter().any(|x| x.new == "res://ui/Icon.png"));
+}
+
+/// Two files with the same name give no single answer, so nothing is proposed.
+#[test]
+fn an_ambiguous_name_produces_no_repair() {
+    let p = Project::load(&project_dir("tricky"));
+    let r = godot_refcheck::checks::repairs(&p, &Options::default());
+    assert!(r.is_empty(), "{:?}", r);
+}
+
+#[test]
+fn a_healthy_project_is_never_rewritten() {
+    for name in ["clean", "legacy3", "conn"] {
+        let p = Project::load(&project_dir(name));
+        let r = godot_refcheck::checks::repairs(&p, &Options::default());
+        assert!(r.is_empty(), "{} would be rewritten: {:?}", name, r);
+    }
+}

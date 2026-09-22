@@ -22,6 +22,11 @@ jobs:
         run: |
           set -eo pipefail
           python3 tools/corpus.py | tee corpus.txt
+      - name: Break a real project and repair it again
+        run: |
+          set -eo pipefail
+          demo=target/corpus/godot-demo-projects/2d/dodge_the_creeps
+          python3 tools/verify_with_godot.py --download --real "$demo" | tee repair.txt
       - name: Publish the table
         run: |
           {
@@ -29,5 +34,11 @@ jobs:
             echo ""
             echo '```'
             cat corpus.txt
+            echo '```'
+            echo ""
+            echo "### Engine agreement and repair"
+            echo ""
+            echo '```'
+            cat repair.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -98,6 +98,16 @@ pub const CHECKS: &[CheckInfo] = &[
         summary: "ExtResource()/SubResource() uses an id the file never declares",
     },
     CheckInfo {
+        id: "broken-connection",
+        level: Level::Error,
+        summary: "a signal connection points at a node the scene does not contain",
+    },
+    CheckInfo {
+        id: "duplicate-class-name",
+        level: Level::Error,
+        summary: "two scripts declare the same global class_name",
+    },
+    CheckInfo {
         id: "uid-path-mismatch",
         level: Level::Warning,
         summary: "uid:// and path in the same reference point at different files",

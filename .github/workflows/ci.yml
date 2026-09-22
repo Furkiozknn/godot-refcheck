@@ -72,8 +72,8 @@ jobs:
         run: |
           echo "errors=${{ steps.refcheck.outputs.errors }}"
           echo "warnings=${{ steps.refcheck.outputs.warnings }}"
-          if [ "${{ steps.refcheck.outputs.errors }}" != "8" ]; then
-            echo "expected 8 errors from the fixture projects"
+          if [ "${{ steps.refcheck.outputs.errors }}" != "17" ]; then
+            echo "expected 17 errors from the fixture projects"
             exit 1
           fi
           if [ "${{ steps.refcheck.outputs.warnings }}" != "2" ]; then

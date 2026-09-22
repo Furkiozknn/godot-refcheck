@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::parse::cfgfile::{self, Entry};
 use crate::parse::gdscript;
+use crate::scene::{ConnDecl, ExtTarget, NodeDecl, SceneFile};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefKind {
@@ -14,6 +15,8 @@ pub enum RefKind {
     ProjectSetting,
     ShaderInclude,
     PluginScript,
+    Extends,
+    Icon,
 }
 
 impl RefKind {
@@ -24,6 +27,8 @@ impl RefKind {
             RefKind::ProjectSetting => "project setting",
             RefKind::ShaderInclude => "#include",
             RefKind::PluginScript => "plugin.cfg",
+            RefKind::Extends => "extends",
+            RefKind::Icon => "@icon",
         }
     }
 }
@@ -36,6 +41,9 @@ pub struct Reference {
     pub path: Option<String>,
     pub uid: Option<String>,
     pub detail: String,
+    /// The literal exactly as it is written in the file, so a repair can put
+    /// the corrected text back in its place without touching anything else.
+    pub raw: String,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +80,9 @@ pub struct Project {
     /// res:// path -> every plain string literal found in it (advisory scan only).
     pub literals: BTreeMap<String, Vec<String>>,
     pub stale_imports: Vec<(String, usize, String)>,
+    pub scenes: BTreeMap<String, SceneFile>,
+    /// global `class_name` -> the scripts that declare it.
+    pub class_names: BTreeMap<String, Vec<String>>,
     /// source asset -> the res:// paths its importer produces outside `.godot/`.
     pub import_products: BTreeMap<String, Vec<String>>,
     pub unreadable: Vec<String>,
@@ -374,6 +385,8 @@ impl Project {
     }
 
     fn read_scene(&mut self, res: &str, src: &str) {
+        let mut scene = SceneFile::default();
+        let mut seen_root = false;
         for e in cfgfile::parse(src) {
             match e {
                 Entry::Section(s) => {
@@ -394,7 +407,8 @@ impl Project {
                             }
                         }
                         "ext_resource" => {
-                            let path = get("path").and_then(|p| normalize_res(&p));
+                            let written = get("path");
+                            let path = written.as_deref().and_then(normalize_res);
                             let uid = get("uid").filter(|u| u.starts_with("uid://"));
                             if let Some(id) = get("id") {
                                 self.id_decls.insert((
@@ -402,6 +416,10 @@ impl Project {
                                     "ExtResource".to_string(),
                                     id.trim().to_string(),
                                 ));
+                                scene.ext.insert(
+                                    id.trim().to_string(),
+                                    ExtTarget { path: path.clone(), uid: uid.clone() },
+                                );
                             }
                             if path.is_some() || uid.is_some() {
                                 self.refs.push(Reference {
@@ -411,8 +429,41 @@ impl Project {
                                     path,
                                     uid,
                                     detail: get("type").unwrap_or_default(),
+                                    raw: written.unwrap_or_default(),
                                 });
                             }
+                        }
+                        "node" => {
+                            let name = get("name").unwrap_or_default();
+                            let parent = get("parent");
+                            let is_root = parent.is_none() && !seen_root;
+                            if is_root {
+                                seen_root = true;
+                            }
+                            let instance = s
+                                .attrs
+                                .iter()
+                                .find(|(k, _)| k == "instance")
+                                .and_then(|(_, v)| {
+                                    id_references(v).into_iter().find(|(k, _)| k == "ExtResource")
+                                })
+                                .map(|(_, id)| id);
+                            scene.nodes.push(NodeDecl {
+                                name,
+                                parent: if is_root { None } else { parent },
+                                instance,
+                                placeholder: get("instance_placeholder").is_some(),
+                                line: s.line,
+                            });
+                        }
+                        "connection" => {
+                            scene.connections.push(ConnDecl {
+                                signal: get("signal").unwrap_or_default(),
+                                from: get("from").unwrap_or_default(),
+                                to: get("to").unwrap_or_default(),
+                                method: get("method").unwrap_or_default(),
+                                line: s.line,
+                            });
                         }
                         "sub_resource" => {
                             if let Some(id) = get("id") {
@@ -444,6 +495,9 @@ impl Project {
                 }
             }
         }
+        if !scene.nodes.is_empty() || !scene.connections.is_empty() {
+            self.scenes.insert(res.to_string(), scene);
+        }
     }
 
     fn read_script(&mut self, res: &str, src: &str) {
@@ -455,8 +509,9 @@ impl Project {
                     line,
                     kind: RefKind::Preload,
                     path: None,
-                    uid: Some(raw),
+                    uid: Some(raw.clone()),
                     detail: String::new(),
+                    raw,
                 });
             } else if let Some(n) = normalize_res(&raw) {
                 self.refs.push(Reference {
@@ -466,8 +521,38 @@ impl Project {
                     path: Some(n),
                     uid: None,
                     detail: String::new(),
+                    raw,
                 });
             }
+        }
+        if let Some((off, raw)) = gdscript::extends_path(src) {
+            if let Some(n) = resolve_relative(res, &raw) {
+                self.refs.push(Reference {
+                    from: res.to_string(),
+                    line: cfgfile::line_of(src, off),
+                    kind: RefKind::Extends,
+                    path: Some(n),
+                    uid: None,
+                    detail: "super class".into(),
+                    raw,
+                });
+            }
+        }
+        if let Some((off, raw)) = gdscript::icon_annotation(src) {
+            if let Some(n) = normalize_res(&raw) {
+                self.refs.push(Reference {
+                    from: res.to_string(),
+                    line: cfgfile::line_of(src, off),
+                    kind: RefKind::Icon,
+                    path: Some(n),
+                    uid: None,
+                    detail: String::new(),
+                    raw,
+                });
+            }
+        }
+        if let Some((_, name)) = gdscript::class_name(src) {
+            self.class_names.entry(name).or_default().push(res.to_string());
         }
         self.literals.insert(res.to_string(), gdscript::string_literals(src));
     }
@@ -482,6 +567,7 @@ impl Project {
                     path: Some(n),
                     uid: None,
                     detail: String::new(),
+                    raw,
                 });
             }
         }
@@ -503,6 +589,7 @@ impl Project {
                                 path: Some(n),
                                 uid: None,
                                 detail: "script".into(),
+                                raw,
                             });
                         }
                     }
@@ -532,8 +619,9 @@ impl Project {
                                 line: a.line,
                                 kind: RefKind::ProjectSetting,
                                 path: None,
-                                uid: Some(lit),
+                                uid: Some(lit.clone()),
                                 detail: format!("{}{}", prefix(&section), a.key),
+                                raw: lit,
                             });
                         } else if lit.starts_with("res://") {
                             if let Some(n) = normalize_res(&lit) {
@@ -544,6 +632,7 @@ impl Project {
                                     path: Some(n),
                                     uid: None,
                                     detail: format!("{}{}", prefix(&section), a.key),
+                                    raw: lit,
                                 });
                             }
                         }

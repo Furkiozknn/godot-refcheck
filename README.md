@@ -14,9 +14,10 @@ often in an exported build, on someone else's computer, long after the commit
 that broke it.
 
 `godot-refcheck` reads the project files directly, resolves every reference the
-way the engine does, and reports the ones that cannot be satisfied. It is a
-single binary with no runtime dependencies, it never launches the engine, and a
-whole project is scanned in well under a second.
+way the engine does, reports the ones that cannot be satisfied, and repairs the
+ones that have a single provable answer. It is a single binary with no runtime
+dependencies, it never launches the engine, and fifteen thousand files are
+scanned in about three seconds.
 
 ```
 $ godot-refcheck tests/projects/broken --fail-on never
@@ -55,14 +56,20 @@ moved.tres:3: warning: uid-path-mismatch: uid://cpresentaaaaaa resolves to res:/
 | `unknown-uid` | error | a `uid://` reference matches no file and has no usable path to fall back on |
 | `duplicate-uid` | error | two files claim the same `uid://`, so the engine may hand out the wrong one |
 | `undeclared-id` | error | a scene uses `ExtResource("3")` or `SubResource("x")` that the file never declares |
+| `broken-connection` | error | a signal is connected from or to a node the scene does not contain; the engine drops such a connection without a word, so the callback simply stops arriving |
+| `duplicate-class-name` | error | two scripts declare the same global `class_name` |
 | `uid-path-mismatch` | warning | the `uid://` and the path in one reference point at different files; the engine follows the uid and ignores the path you read |
 | `stale-import` | warning | a `.import` file left behind by an asset that was deleted or renamed |
 | `unused-asset` | note | nothing in the project appears to reference this asset (opt-in, advisory) |
 
 References are collected from `.tscn`, `.tres`, `.escn`, `project.godot`,
 `.import`, `plugin.cfg`, `.gd`/`.cs` (`preload()` and `load()` with a literal
-argument) and `.gdshader` (`#include`). Godot 3 and Godot 4 project formats are
-both understood.
+argument, `extends "res://…"`, `@icon("res://…")`) and `.gdshader` (`#include`).
+Godot 3 and Godot 4 project formats are both understood.
+
+Node paths are resolved through the whole scene graph, so a connection into an
+instanced sub-scene, into a scene this one inherits from, or under an
+`instance_placeholder` is understood rather than guessed at.
 
 ## Install
 
@@ -95,10 +102,52 @@ godot-refcheck . --json            # machine-readable
 godot-refcheck . --sarif out.sarif # for GitHub code scanning
 godot-refcheck . --only duplicate-uid,case-mismatch
 godot-refcheck . --skip stale-import --fail-on warning
+godot-refcheck . --fix                 # repair what can be proved, in place
+godot-refcheck . --fix-dry-run         # show those repairs, change nothing
+godot-refcheck . --write-baseline refcheck-baseline.txt
+godot-refcheck . --baseline refcheck-baseline.txt
 ```
 
 Exit codes: `0` nothing at or above `--fail-on` (default `error`), `1`
 something was found, `2` the project could not be read.
+
+## Repairing what can be proved
+
+A missing reference usually has exactly one possible answer: the file is still
+there under a different spelling, the `uid://` already resolves somewhere, or
+exactly one file in the project carries that name. `--fix` applies those and
+leaves everything else alone. It never guesses: two files with the same name
+mean no repair, and a path written with a locale suffix or a `..` step is left
+for a person.
+
+```
+$ godot-refcheck ~/games/moved --fix
+repaired 3 references
+  level.gd:3  res://scenes/player.tscn -> res://player.tscn
+      res://player.tscn is the only file named player.tscn (missing-resource)
+  level.tscn:4  res://art/wall.png -> res://art/tiles/wall.png
+      res://art/tiles/wall.png is the only file named wall.png (missing-resource)
+  level.tscn:5  res://ui/icon.png -> res://ui/Icon.png
+      the file on disk is spelled that way (case-mismatch)
+```
+
+`--fix-dry-run` prints the same list and changes nothing. Repairs are
+single-line, in-place edits: line endings, ordering and every other byte of the
+file stay as they were. Nothing is ever deleted - a leftover `.import` file is
+reported, never removed.
+
+## Adopting it on a project that already has findings
+
+```sh
+godot-refcheck . --write-baseline refcheck-baseline.txt   # once
+godot-refcheck . --baseline refcheck-baseline.txt         # from then on
+```
+
+The baseline is a sorted, tab-separated text file that diffs and merges like the
+rest of the repository. It records the check, the project, the file and the
+message, but deliberately not the line number, so editing the lines above a
+finding does not wake it up again. New problems still fail the build on the day
+they appear.
 
 ## In CI
 
@@ -119,7 +168,8 @@ jobs:
 ```
 
 Inputs: `path`, `recursive`, `unused`, `only`, `skip`, `fail-on`, `sarif`,
-`version`. Outputs: `errors`, `warnings`, `notes`, `findings`.
+`fix`, `fix-dry-run`, `baseline`, `version`. Outputs: `errors`, `warnings`,
+`notes`, `findings`, `repaired`.
 
 With `sarif: refcheck.sarif` the findings can be uploaded to GitHub code
 scanning and appear inline on the changed lines of a pull request:
@@ -141,12 +191,15 @@ place against real projects and against the engine itself.
 
 **The engine is the reference.** `tools/verify_with_godot.py` runs a real
 headless Godot over the fixture projects and compares what the engine prints
-with what `godot-refcheck` reports. Six of the eight checks have a matching
-engine message; the other two are listed as static-only, with the reason the
-engine stays silent.
+with what `godot-refcheck` reports. Eight cases have a matching engine message.
+The rest are listed as static-only with the reason the engine stays silent, and
+one fixture exists purely to show the engine accepting a project that is broken.
+Two round trips close the loop: a fixture and a real demo are broken by moving
+folders, repaired with `--fix`, and handed back to the engine, which then has
+nothing to say.
 
 ```
-$ python3 tools/verify_with_godot.py --download
+$ python3 tools/verify_with_godot.py --download --real ../godot-demo-projects/2d/dodge_the_creeps
 godot 4.4.1-stable as the reference implementation
 
   [ok] broken   missing-resource   engine=yes refcheck=yes
@@ -155,7 +208,10 @@ godot 4.4.1-stable as the reference implementation
   [ok] broken   case-mismatch      engine=yes refcheck=yes
   [ok] broken   duplicate-uid      engine=yes refcheck=yes
   [ok] broken   unknown-uid        engine=yes refcheck=yes
+  [ok] scripts  missing-resource   engine=yes refcheck=yes
+  [ok] scripts  duplicate-class-name engine=yes refcheck=yes
 
+  [static-only] broken-connection  the engine drops a connection it cannot resolve without a word, so the signal simply stops arriving
   [static-only] stale-import       leftover import metadata is ignored rather than reported
   [static-only] uid-path-mismatch  the engine silently prefers the uid and never mentions the stale path
   [static-only] undeclared-id      the engine only reports it when that particular scene is loaded
@@ -164,19 +220,30 @@ godot 4.4.1-stable as the reference implementation
   [ok] clean    healthy project: engine errors=0 refcheck findings=0
   [ok] tricky   healthy project: engine errors=0 refcheck findings=0
   [ok] legacy3  healthy project: engine errors=0 refcheck findings=0
+
+  [ok] conn     the engine is silent, refcheck is not: engine errors=0 broken-connection=2 other=0
+
+  [ok] moved    repair round trip: engine errors before=17 after=0, refcheck findings after=0
+
+  [ok] dodge_the_creeps: moved 2 folders, 13 references went stale, 0 left after --fix, engine errors after=0
+
+8 engine-confirmed cases, 3 healthy projects, 1 case the engine keeps quiet about and one repair round trip: all matched.
 ```
 
 **Working projects are the other reference.** `tools/corpus.py` scans eleven
-real repositories — 237 projects, 19,305 files, 6,761 references. It reports 25
-findings in total, every one of them checked by hand and real; nothing else in
-those projects produces a finding. [docs/corpus.md](docs/corpus.md) lists each
-one. Shapes that look broken and are not — locale-suffixed translation remaps,
-translations generated from a `.csv` at import time, the dead `[locale]` block
-Godot 3 leaves behind, `load("res://levels/%s.tscn" % name)`, sub-resource
-paths, Godot 3's `ExtResource( 1 )` — are all carried in the test suite as named
-regression tests, because each of them once produced a false finding here.
+real repositories — 237 projects, 19,305 files, 6,904 references, 2,741 signal
+connections and 880 `class_name` declarations. It reports 41 findings in total,
+every one of them checked by hand and real; nothing else in those projects
+produces a finding, and `--fix-dry-run` proposes no change anywhere in them.
+[docs/corpus.md](docs/corpus.md) lists each one. Shapes that look broken and are
+not — a connection into an instanced or inherited scene, locale-suffixed
+translation remaps, translations generated from a `.csv` at import time, the
+dead `[locale]` block Godot 3 leaves behind,
+`load("res://levels/%s.tscn" % name)`, sub-resource paths, Godot 3's
+`ExtResource( 1 )` — are all carried in the test suite as named regression
+tests, because each of them once produced a false finding here.
 
-`cargo test` runs 73 tests, all offline.
+`cargo test` runs 107 tests, all offline.
 
 ## Limitations
 
@@ -187,12 +254,15 @@ regression tests, because each of them once produced a false finding here.
   because a `class_name` can be used with no `res://` reference at all.
 - Project settings are only followed inside sections the engine itself defines,
   so a custom section cannot produce a false error.
+- Whether a connected method exists is not checked: a signal may legitimately be
+  wired to a built-in method such as `queue_free` or `set_h_offset`, and only the
+  engine knows the full class API.
 - C# is read for `preload`/`load` calls only; it is not parsed as C#.
 
 ## Development
 
 ```sh
-cargo test                                   # 73 tests, no network
+cargo test                                   # 107 tests, no network
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 python3 tools/verify_with_godot.py --download

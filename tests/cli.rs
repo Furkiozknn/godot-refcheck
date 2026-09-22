@@ -253,7 +253,7 @@ fn recursive_mode_visits_every_fixture_project() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/projects");
     let o = run(&[root.to_str().unwrap(), "--recursive", "--fail-on", "never", "--quiet"]);
     assert_eq!(o.code, 0, "{}", o.stderr);
-    assert!(o.stdout.contains("4 projects"), "{}", o.stdout);
+    assert!(o.stdout.contains("7 projects"), "{}", o.stdout);
 }
 
 #[test]
@@ -283,4 +283,104 @@ fn a_subdirectory_resolves_up_to_the_project_root() {
 fn quiet_prints_one_line() {
     let o = run(&[project("broken").to_str().unwrap(), "--quiet", "--fail-on", "never"]);
     assert_eq!(o.stdout.lines().count(), 1);
+}
+
+// --- repairs ---------------------------------------------------------------
+
+fn copy_project(name: &str, tag: &str) -> PathBuf {
+    let dest = std::env::temp_dir().join(format!("refcheck-{}-{}", tag, std::process::id()));
+    let _ = std::fs::remove_dir_all(&dest);
+    copy_dir(&project(name), &dest);
+    dest
+}
+
+fn copy_dir(from: &PathBuf, to: &PathBuf) {
+    std::fs::create_dir_all(to).unwrap();
+    for e in std::fs::read_dir(from).unwrap() {
+        let e = e.unwrap();
+        let target = to.join(e.file_name());
+        if e.file_type().unwrap().is_dir() {
+            copy_dir(&e.path(), &target);
+        } else {
+            std::fs::copy(e.path(), target).unwrap();
+        }
+    }
+}
+
+#[test]
+fn fix_dry_run_changes_nothing_on_disk() {
+    let dir = copy_project("moved", "dry");
+    let before = std::fs::read_to_string(dir.join("level.tscn")).unwrap();
+    let o = run(&[dir.to_str().unwrap(), "--fix-dry-run", "--fail-on", "never"]);
+    assert_eq!(o.code, 0, "{}", o.stderr);
+    assert!(o.stdout.contains("would repair 3 references"), "{}", o.stdout);
+    assert_eq!(std::fs::read_to_string(dir.join("level.tscn")).unwrap(), before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn fix_repairs_a_moved_project_completely() {
+    let dir = copy_project("moved", "fix");
+    let o = run(&[dir.to_str().unwrap(), "--fix", "--fail-on", "never"]);
+    assert!(o.stdout.contains("repaired 3 references"), "{}", o.stdout);
+    let after = run(&[dir.to_str().unwrap(), "--fail-on", "never", "--quiet"]);
+    assert!(after.stdout.contains("0 errors, 0 warnings"), "{}", after.stdout);
+    let level = std::fs::read_to_string(dir.join("level.tscn")).unwrap();
+    assert!(level.contains("res://art/tiles/wall.png"));
+    assert!(level.contains("res://ui/Icon.png"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn fix_leaves_a_healthy_project_untouched() {
+    let dir = copy_project("clean", "untouched");
+    let before = std::fs::read_to_string(dir.join("main.tscn")).unwrap();
+    let o = run(&[dir.to_str().unwrap(), "--fix"]);
+    assert_eq!(o.code, 0, "{}{}", o.stdout, o.stderr);
+    assert!(!o.stdout.contains("repaired"));
+    assert_eq!(std::fs::read_to_string(dir.join("main.tscn")).unwrap(), before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn fix_and_fix_dry_run_together_are_a_usage_error() {
+    let o = run(&[project("clean").to_str().unwrap(), "--fix", "--fix-dry-run"]);
+    assert_eq!(o.code, 2);
+    assert!(o.stderr.contains("cannot both be given"));
+}
+
+// --- baseline --------------------------------------------------------------
+
+#[test]
+fn a_written_baseline_silences_exactly_what_it_lists() {
+    let file = std::env::temp_dir().join(format!("refcheck-base-{}.txt", std::process::id()));
+    let broken = project("broken");
+    let w = run(&[broken.to_str().unwrap(), "--write-baseline", file.to_str().unwrap()]);
+    assert_eq!(w.code, 0, "{}", w.stderr);
+    assert!(w.stdout.contains("baseline written"));
+
+    let o = run(&[broken.to_str().unwrap(), "--baseline", file.to_str().unwrap()]);
+    assert_eq!(o.code, 0, "{}{}", o.stdout, o.stderr);
+    assert!(o.stdout.contains("no problems found"), "{}", o.stdout);
+
+    let j = run(&[broken.to_str().unwrap(), "--baseline", file.to_str().unwrap(), "--json"]);
+    assert_valid_json(&j.stdout);
+    assert!(j.stdout.contains("\"baselined\": 10"), "{}", j.stdout);
+    let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn a_baseline_that_does_not_exist_is_a_usage_error() {
+    let o = run(&[project("clean").to_str().unwrap(), "--baseline", "/no/such/baseline"]);
+    assert_eq!(o.code, 2);
+}
+
+#[test]
+fn json_reports_the_repairs_it_would_make() {
+    let dir = copy_project("moved", "json");
+    let o = run(&[dir.to_str().unwrap(), "--fix-dry-run", "--json", "--fail-on", "never"]);
+    assert_valid_json(&o.stdout);
+    assert!(o.stdout.contains("\"repairs\""));
+    assert!(o.stdout.contains("res://art/tiles/wall.png"));
+    let _ = std::fs::remove_dir_all(&dir);
 }

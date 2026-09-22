@@ -34,6 +34,18 @@ inputs:
     description: Write a SARIF 2.1.0 report to this file.
     required: false
     default: ""
+  fix:
+    description: Repair in place every reference that can be proved, then report what is left.
+    required: false
+    default: "false"
+  fix-dry-run:
+    description: Show those repairs without changing a file.
+    required: false
+    default: "false"
+  baseline:
+    description: Path to a baseline file whose findings should be ignored.
+    required: false
+    default: ""
   version:
     description: Release to use. Defaults to the version of the action itself.
     required: false
@@ -52,6 +64,9 @@ outputs:
   findings:
     description: Total number of findings.
     value: ${{ steps.run.outputs.findings }}
+  repaired:
+    description: Number of references repaired, when fix is on.
+    value: ${{ steps.run.outputs.repaired }}
 
 runs:
   using: composite
@@ -128,6 +143,15 @@ runs:
         if [ -n '${{ inputs.sarif }}' ]; then
           args="$args --sarif ${{ inputs.sarif }}"
         fi
+        if [ '${{ inputs.fix }}' = 'true' ]; then
+          args="$args --fix"
+        fi
+        if [ '${{ inputs.fix-dry-run }}' = 'true' ]; then
+          args="$args --fix-dry-run"
+        fi
+        if [ -n '${{ inputs.baseline }}' ]; then
+          args="$args --baseline ${{ inputs.baseline }}"
+        fi
 
         # One pass that never fails, so the counts and the summary are always produced.
         report="${RUNNER_TEMP}/godot-refcheck-report.txt"
@@ -139,11 +163,14 @@ runs:
         notes="$(echo "$summary"    | sed -n 's/.*, \([0-9]*\) notes.*/\1/p')"
         errors="${errors:-0}"; warnings="${warnings:-0}"; notes="${notes:-0}"
         total=$((errors + warnings + notes))
+        repaired="$(grep -cE '^  .* -> ' "$report" || true)"
+        repaired="${repaired:-0}"
         {
           echo "errors=$errors"
           echo "warnings=$warnings"
           echo "notes=$notes"
           echo "findings=$total"
+          echo "repaired=$repaired"
         } >> "$GITHUB_OUTPUT"
         {
           echo "### godot-refcheck"

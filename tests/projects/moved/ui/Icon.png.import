@@ -1,0 +1,10 @@
+[remap]
+
+importer="texture"
+type="CompressedTexture2D"
+uid="uid://ciconbbbbbbbbb"
+
+[deps]
+
+source_file="res://ui/Icon.png"
+dest_files=["res://.godot/imported/x-ciconbbbbbbbbb.ctex"]

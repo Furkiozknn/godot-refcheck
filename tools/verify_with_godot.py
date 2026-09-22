@@ -36,6 +36,8 @@ ENGINE_CASES = [
     ("broken", "case-mismatch", "res://Art/Present.PNG"),
     ("broken", "duplicate-uid", "UID duplicate detected"),
     ("broken", "unknown-uid", "Unrecognized UID"),
+    ("scripts", "missing-resource", 'Could not resolve super class path "res://no_such_base.gd"'),
+    ("scripts", "duplicate-class-name", 'Class "Hero" hides a global script class'),
 ]
 
 # Checks the engine cannot report on its own, with the reason they still matter.
@@ -43,10 +45,18 @@ STATIC_ONLY = {
     "undeclared-id": "the engine only reports it when that particular scene is loaded",
     "uid-path-mismatch": "the engine silently prefers the uid and never mentions the stale path",
     "stale-import": "leftover import metadata is ignored rather than reported",
+    "broken-connection": "the engine drops a connection it cannot resolve without a word, so the signal simply stops arriving",
     "unused-asset": "advisory; the engine has no notion of an unused asset",
 }
 
 CLEAN_PROJECTS = ["clean", "tricky", "legacy3"]
+
+# Projects the engine accepts in silence while something in them is broken.
+# These are the cases a static pass exists for.
+SILENT_CASES = {"conn": ("broken-connection", 2)}
+
+# A project the engine refuses, repaired by --fix, then accepted by the engine.
+REPAIR_CASE = "moved"
 
 
 def download_godot(dest):
@@ -92,9 +102,9 @@ def run_engine(godot, project):
     return "\n".join(output)
 
 
-def run_refcheck(binary, project):
+def run_refcheck(binary, project, extra=()):
     p = subprocess.run(
-        [binary, project, "--json", "--fail-on", "never", "--unused"],
+        [binary, project, "--json", "--fail-on", "never", "--unused", *extra],
         capture_output=True,
         text=True,
         timeout=300,
@@ -104,10 +114,68 @@ def run_refcheck(binary, project):
     return json.loads(p.stdout)["findings"]
 
 
+def engine_errors(output):
+    return [
+        line
+        for line in output.splitlines()
+        if line.startswith("ERROR:") or line.startswith("SCRIPT ERROR:")
+    ]
+
+
+def move_folders(project):
+    """Move every top-level asset folder under assets/, the way a tidy-up does."""
+    skip = {"assets", "screenshots", ".git", ".godot", ".import", "addons"}
+    dest = os.path.join(project, "assets")
+    os.makedirs(dest, exist_ok=True)
+    moved = []
+    for name in sorted(os.listdir(project)):
+        path = os.path.join(project, name)
+        if not os.path.isdir(path) or name in skip or name.startswith("."):
+            continue
+        shutil.move(path, os.path.join(dest, name))
+        moved.append(name)
+    return moved
+
+
+def real_project_round_trip(godot, binary, source):
+    work = tempfile.mkdtemp(prefix="refcheck-real-")
+    copy = os.path.join(work, os.path.basename(os.path.normpath(source)))
+    shutil.copytree(source, copy)
+    shutil.rmtree(os.path.join(copy, ".godot"), ignore_errors=True)
+    moved = move_folders(copy)
+    broken = run_refcheck(binary, copy)
+    subprocess.run(
+        [binary, copy, "--fix", "--fail-on", "never"], capture_output=True, text=True, timeout=600
+    )
+    left = run_refcheck(binary, copy)
+    errors = engine_errors(run_engine(godot, copy))
+    shutil.rmtree(work, ignore_errors=True)
+    return moved, broken, left, errors
+
+
+def repair_round_trip(godot, binary):
+    """Break, repair, and let the engine say whether the repair worked."""
+    work = tempfile.mkdtemp(prefix="refcheck-repair-")
+    copy = os.path.join(work, REPAIR_CASE)
+    shutil.copytree(os.path.join(PROJECTS, REPAIR_CASE), copy)
+    before = engine_errors(run_engine(godot, copy))
+    subprocess.run(
+        [binary, copy, "--fix", "--fail-on", "never"], capture_output=True, text=True, timeout=300
+    )
+    after = engine_errors(run_engine(godot, copy))
+    left = run_refcheck(binary, copy)
+    shutil.rmtree(work, ignore_errors=True)
+    return before, after, left
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--godot", help="path to a Godot 4 binary")
     ap.add_argument("--download", action="store_true")
+    ap.add_argument(
+        "--real",
+        help="a real Godot project to move folders around in, then repair",
+    )
     ap.add_argument(
         "--binary",
         default=os.path.join(ROOT, "target", "release", "godot-refcheck"),
@@ -129,7 +197,7 @@ def main():
     failures = []
     engine_output = {}
     findings = {}
-    for name in sorted(set([c[0] for c in ENGINE_CASES] + CLEAN_PROJECTS)):
+    for name in sorted(set([c[0] for c in ENGINE_CASES] + CLEAN_PROJECTS + list(SILENT_CASES))):
         project = os.path.join(PROJECTS, name)
         engine_output[name] = run_engine(godot, project)
         findings[name] = run_refcheck(args.binary, project)
@@ -152,11 +220,7 @@ def main():
 
     print()
     for name in CLEAN_PROJECTS:
-        errors = [
-            line
-            for line in engine_output[name].splitlines()
-            if line.startswith("ERROR:") or line.startswith("SCRIPT ERROR:")
-        ]
+        errors = engine_errors(engine_output[name])
         # A second import pass regenerates translations, so the first-pass
         # message about them is expected and is filtered out here.
         errors = [e for e in errors if ".translation" not in e]
@@ -173,11 +237,54 @@ def main():
         shutil.rmtree(tmp, ignore_errors=True)
 
     print()
+    for name, (check, count) in sorted(SILENT_CASES.items()):
+        errors = engine_errors(engine_output[name])
+        ours = [f for f in findings[name] if f["check"] == check]
+        others = [f for f in findings[name] if f["check"] != check]
+        ok = not errors and len(ours) == count and not others
+        print(
+            f"  [{'ok' if ok else 'FAIL'}] {name:<8} the engine is silent, refcheck is not: "
+            f"engine errors={len(errors)} {check}={len(ours)} other={len(others)}"
+        )
+        if not ok:
+            failures.append(f"{name}: engine={errors[:2]} {check}={len(ours)} other={len(others)}")
+
+    print()
+    before, after, left = repair_round_trip(godot, args.binary)
+    ok = bool(before) and not after and not left
+    print(
+        f"  [{'ok' if ok else 'FAIL'}] {REPAIR_CASE:<8} repair round trip: "
+        f"engine errors before={len(before)} after={len(after)}, refcheck findings after={len(left)}"
+    )
+    if not ok:
+        failures.append(
+            f"repair round trip: before={before[:2]} after={after[:2]} left={[f['check'] for f in left]}"
+        )
+
+    if args.real:
+        moved, broken, left, errors = real_project_round_trip(godot, args.binary, args.real)
+        ok = bool(broken) and not left and not errors
+        print()
+        print(
+            f"  [{'ok' if ok else 'FAIL'}] {os.path.basename(os.path.normpath(args.real))}: "
+            f"moved {len(moved)} folders, {len(broken)} references went stale, "
+            f"{len(left)} left after --fix, engine errors after={len(errors)}"
+        )
+        if not ok:
+            failures.append(
+                f"real project: broken={len(broken)} left={[f['check'] for f in left]} engine={errors[:2]}"
+            )
+
+    print()
     if failures:
         for f in failures:
             print("FAIL " + f)
         return 1
-    print(f"{len(ENGINE_CASES)} engine-confirmed cases, {len(CLEAN_PROJECTS)} healthy projects: all matched.")
+    print(
+        f"{len(ENGINE_CASES)} engine-confirmed cases, {len(CLEAN_PROJECTS)} healthy projects, "
+        f"{len(SILENT_CASES)} case the engine keeps quiet about and one repair round trip: "
+        f"all matched."
+    )
     return 0
 
 

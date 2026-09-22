@@ -1,0 +1,9 @@
+[gd_scene format=3 uid="uid://cconnpanelaaaa"]
+
+[node name="Panel" type="Panel"]
+
+[node name="Inner" type="Button" parent="."]
+text = "inner"
+
+[node name="Deep" type="Button" parent="Inner"]
+text = "deep"

@@ -4,29 +4,47 @@ Rules are only worth having if they stay quiet on projects that work. These
 eleven repositories are real, maintained Godot projects; `tools/corpus.py`
 clones them and runs `godot-refcheck` over every `project.godot` inside.
 
-Measured on 2026-09-22 with godot-refcheck 0.1.0, shallow clones of the default
+Measured on 2026-09-22 with godot-refcheck 0.2.0, shallow clones of the default
 branch unless a branch is named.
 
 | repository | projects | files | references | findings |
 | --- | ---: | ---: | ---: | ---: |
-| godotengine/godot-demo-projects | 139 | 4,040 | 2,007 | 6 |
-| godotengine/godot-demo-projects@3.x | 89 | 2,257 | 1,442 | 10 |
+| godotengine/godot-demo-projects | 139 | 4,040 | 2,023 | 6 |
+| godotengine/godot-demo-projects@3.x | 89 | 2,257 | 1,452 | 10 |
 | godotengine/godot-benchmarks | 1 | 896 | 73 | 0 |
-| Orama-Interactive/Pixelorama | 1 | 1,380 | 682 | 0 |
-| RodZill4/material-maker | 1 | 2,912 | 922 | 4 |
-| mbrlabs/Lorien | 1 | 212 | 131 | 0 |
-| GDQuest/godot-open-rpg | 1 | 1,373 | 627 | 5 |
-| Maaack/godot-game-template | 1 | 740 | 346 | 0 |
-| Maaack/Godot-Menus-Template | 1 | 593 | 211 | 0 |
-| MakovWait/godots | 1 | 4,070 | 169 | 0 |
-| bitbrain/beehave | 1 | 832 | 151 | 0 |
-| **total** | **237** | **19,305** | **6,761** | **25** |
+| Orama-Interactive/Pixelorama | 1 | 1,380 | 684 | 0 |
+| RodZill4/material-maker | 1 | 2,912 | 997 | 20 |
+| mbrlabs/Lorien | 1 | 212 | 133 | 0 |
+| GDQuest/godot-open-rpg | 1 | 1,373 | 643 | 5 |
+| Maaack/godot-game-template | 1 | 740 | 356 | 0 |
+| Maaack/Godot-Menus-Template | 1 | 593 | 215 | 0 |
+| MakovWait/godots | 1 | 4,070 | 174 | 0 |
+| bitbrain/beehave | 1 | 832 | 154 | 0 |
+| **total** | **237** | **19,305** | **6,904** | **41** |
 
-25 findings: 10 errors and 15 warnings. Each one was checked by hand against
+41 findings: 26 errors and 15 warnings. Each one was checked by hand against
 the repository it came from, and each one is a real defect. No other reference
-in those 6,761 produced a finding.
+in those 6,904 produced a finding, none of the 2,741 signal connections in these
+projects was wrongly called broken, none of the 880 `class_name` declarations
+collided, and `--fix-dry-run` proposes no change anywhere in the corpus.
 
-## The ten errors
+## The sixteen dead connections
+
+All sixteen are in `material-maker`, and Godot reports none of them: a
+connection whose node cannot be resolved is dropped without a message, so the
+signal simply never arrives.
+
+| file | connection | why it cannot resolve |
+| --- | --- | --- |
+| `widgets/curve_edit/curve_editor.tscn` | three connections from and to `ControlPoint` | the scene inherits from `curve_view.tscn`, whose only node is `CurveView`; control points are created at run time by `curve_editor.gd` and wired there in code |
+| `widgets/curve_edit/curve_dialog.tscn` | three connections to `…/CurveEditor/@Control@283287` | `@Control@…` is a name Godot generates for an unnamed node at run time; it is regenerated on every run and never matches |
+| `widgets/polygon_edit/polygon_dialog.tscn` | one connection to `…/PolygonEditor/@Control@242305` | the same |
+| `panels/preview_2d/preview_2d_panel.tscn` | one connection to `PolygonEditor/@Control@42512` | the same |
+
+Each of these is reported once for `from` and once for `to`, which is how the
+count reaches sixteen.
+
+## The ten path errors
 
 | project | finding | confirmed by |
 | --- | --- | --- |
@@ -61,6 +79,24 @@ None of these break a build; the engine ignores them. They are reported as
 warnings because they are dead files that confuse the next person who renames
 something in that folder.
 
+## Repairs, on projects that work and on projects that do not
+
+`--fix-dry-run` over the whole corpus proposes **no change at all**. The findings
+there are unknown uids, a missing addon, dead connections and leftover import
+files, and none of those has a single provable answer.
+
+To see repairs at work, a project has to be broken first. Two experiments, both
+reproducible with `tools/verify_with_godot.py --real <project>`:
+
+| experiment | before | `--fix` | after |
+| --- | --- | --- | --- |
+| `2d/dodge_the_creeps` (Godot 4), `art/` and `fonts/` moved under `assets/` | 13 references now disagree with the files on disk; the engine still loads the project because every reference also carries a `uid://` | repaired 13 | no findings, and the engine still reports nothing |
+| `2d/platformer` from the 3.x branch (Godot 3, no uids), `src/` moved under `assets/` | 31 references broken outright | repaired 31 | no findings |
+
+The Godot 4 case is the interesting one: nothing was visibly broken, because the
+engine quietly followed the uid. Every path written in those scene files was
+wrong, and would have broken the day a `.uid` or `.import` sidecar went missing.
+
 ## Shapes that produce nothing, and once did
 
 Every item below produced a false finding during development. Each is now a
@@ -77,6 +113,10 @@ unit tests.
 | `load("res://material_maker/theme" + name)` | material-maker | same, by concatenation |
 | `instance=ExtResource( 1 )` | Godot 3 scenes throughout the 3.x branch | the spaces are the Godot 3 spelling, not an empty id |
 | `res://scene.tscn::3` | sub-resources everywhere | the `::3` selects a resource inside the file |
+| `from="Panel/Inner"` | connections in almost every project | the node comes from an instanced scene and is written down in that file, not this one |
+| `from="FromBase"` in an inherited scene | `godot-game-template` and others | the node comes from the scene this one inherits from |
+| a connection under an `instance_placeholder` | deferred loading | the subtree only exists at run time |
+| `method="set_h_offset"` | `godot-demo-projects` | a signal wired to a built-in method, which is why the method is not checked at all |
 
 ## Reproducing
 

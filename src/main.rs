@@ -2,8 +2,10 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use godot_refcheck::baseline;
 use godot_refcheck::checks::{self, Options};
 use godot_refcheck::finding::{Finding, Level, CHECKS};
+use godot_refcheck::fix::{self, Applied};
 use godot_refcheck::project::{find_project_root, Project};
 use godot_refcheck::report;
 
@@ -20,6 +22,10 @@ USAGE:
 OPTIONS:
     --recursive          scan every project.godot found under PATH
     --unused             also report assets nothing appears to reference (note level)
+    --fix                repair in place every reference that can be proved
+    --fix-dry-run        show those repairs without touching a file
+    --baseline <file>    ignore the findings listed in this file
+    --write-baseline <f> write the current findings to this file and stop
     --only <ids>         run only these checks (comma separated)
     --skip <ids>         skip these checks (comma separated)
     --fail-on <level>    exit 1 at this level or above: error, warning, info, never
@@ -44,6 +50,10 @@ struct Args {
     quiet: bool,
     sarif: Option<PathBuf>,
     fail_on: Option<Level>,
+    fix: bool,
+    fix_dry_run: bool,
+    baseline: Option<PathBuf>,
+    write_baseline: Option<PathBuf>,
     opts: Options,
 }
 
@@ -55,6 +65,10 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
         quiet: false,
         sarif: None,
         fail_on: Some(Level::Error),
+        fix: false,
+        fix_dry_run: false,
+        baseline: None,
+        write_baseline: None,
         opts: Options::default(),
     };
     let mut seen_path = false;
@@ -74,6 +88,10 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             "--json" => a.json = true,
             "--quiet" | "-q" => a.quiet = true,
             "--sarif" => a.sarif = Some(PathBuf::from(next("--sarif")?)),
+            "--fix" => a.fix = true,
+            "--fix-dry-run" => a.fix_dry_run = true,
+            "--baseline" => a.baseline = Some(PathBuf::from(next("--baseline")?)),
+            "--write-baseline" => a.write_baseline = Some(PathBuf::from(next("--write-baseline")?)),
             "--only" => {
                 let v = next("--only")?;
                 a.opts.only = Some(split_ids(&v));
@@ -98,6 +116,9 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             }
         }
         i += 1;
+    }
+    if a.fix && a.fix_dry_run {
+        return Err("--fix and --fix-dry-run cannot both be given".into());
     }
     let known: BTreeSet<&str> = CHECKS.iter().map(|c| c.id).collect();
     for set in [a.opts.only.as_ref(), Some(&a.opts.skip)].into_iter().flatten() {
@@ -190,18 +211,49 @@ fn main() -> ExitCode {
         }
     }
 
+    let known = match &args.baseline {
+        Some(path) => match std::fs::read_to_string(path) {
+            Ok(text) => baseline::parse(&text),
+            Err(e) => {
+                eprintln!("godot-refcheck: cannot read {}: {}", path.display(), e);
+                return ExitCode::from(2);
+            }
+        },
+        None => Default::default(),
+    };
+
     let mut all: Vec<Finding> = Vec::new();
     let mut scanned = 0usize;
     let mut refs = 0usize;
     let mut chunks: Vec<String> = Vec::new();
+    let mut applied: Vec<Applied> = Vec::new();
+    let mut baselined = 0usize;
 
     for root in &roots {
-        let p = Project::load(root);
+        let mut p = Project::load(root);
+        if args.fix || args.fix_dry_run {
+            let repairs = checks::repairs(&p, &args.opts);
+            if args.fix_dry_run {
+                applied.extend(repairs.into_iter().map(|f| Applied {
+                    fix: f,
+                    ok: true,
+                    note: String::new(),
+                }));
+            } else if !repairs.is_empty() {
+                let done = fix::apply(root, &repairs);
+                if done.iter().any(|a| a.ok) {
+                    p = Project::load(root);
+                }
+                applied.extend(done);
+            }
+        }
         let mut f = checks::run(&p, &args.opts);
         let label = relative_label(&args.path, root);
         for item in f.iter_mut() {
             item.project = label.clone();
         }
+        let (f, silenced) = baseline::split(f, &known);
+        baselined += silenced;
         scanned += p.files.len();
         refs += checks::ref_count(&p);
         if !args.quiet && !args.json && (roots.len() == 1 || !f.is_empty()) {
@@ -217,11 +269,32 @@ fn main() -> ExitCode {
 
     godot_refcheck::finding::sort(&mut all);
 
+    if let Some(path) = &args.write_baseline {
+        let text = baseline::render(&all, &report::today());
+        if let Err(e) = std::fs::write(path, text) {
+            eprintln!("godot-refcheck: cannot write {}: {}", path.display(), e);
+            return ExitCode::from(2);
+        }
+        println!("baseline written to {} with {} findings.", path.display(), all.len());
+        return ExitCode::from(0);
+    }
+
     if args.json {
-        print!("{}", report::json(&all, scanned, refs, &args.path.display().to_string()));
+        print!(
+            "{}",
+            report::json(
+                &all,
+                scanned,
+                refs,
+                &args.path.display().to_string(),
+                &applied,
+                baselined
+            )
+        );
     } else if args.quiet {
         println!("{}", report::summary(&all, roots.len(), scanned, refs));
     } else {
+        print!("{}", report::fixes(&applied, args.fix_dry_run));
         for c in &chunks {
             print!("{}", c);
         }

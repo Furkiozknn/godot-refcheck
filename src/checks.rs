@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::finding::{Finding, Level};
+use crate::fix::{self, Fix};
 use crate::project::{Project, RefKind};
+use crate::scene::{judgeable, Resolver};
 
 #[derive(Default)]
 pub struct Options {
@@ -25,6 +27,14 @@ impl Options {
 pub fn run(p: &Project, o: &Options) -> Vec<Finding> {
     let mut out = Vec::new();
     let dup = duplicate_uids(p);
+    let names = fix::by_name(p);
+    let moved = |missing: &str| -> Option<String> {
+        let base = missing.rsplit('/').next()?;
+        match names.get(base) {
+            Some(list) if list.len() == 1 => Some(list[0].clone()),
+            _ => None,
+        }
+    };
 
     if o.wants("duplicate-uid") {
         for (uid, owners) in &dup {
@@ -94,6 +104,10 @@ pub fn run(p: &Project, o: &Options) -> Vec<Finding> {
                         Some(u) => format!("; uid {} is also unknown", u),
                         None => String::new(),
                     };
+                    let hint = match moved(path) {
+                        Some(t) => format!("{} - the only file with that name is {}", origin(r), t),
+                        None => origin(r),
+                    };
                     out.push(Finding {
                         project: String::new(),
                         check: "missing-resource",
@@ -101,7 +115,7 @@ pub fn run(p: &Project, o: &Options) -> Vec<Finding> {
                         file: r.from.clone(),
                         line: r.line,
                         message: format!("{} is not in the project{}", path, extra),
-                        evidence: origin(r),
+                        evidence: hint,
                     });
                 }
             }
@@ -141,6 +155,31 @@ pub fn run(p: &Project, o: &Options) -> Vec<Finding> {
         }
     }
 
+    if o.wants("broken-connection") {
+        out.extend(broken_connections(p, o));
+    }
+
+    if o.wants("duplicate-class-name") {
+        for (name, owners) in &p.class_names {
+            if owners.len() < 2 {
+                continue;
+            }
+            for owner in owners {
+                let others: Vec<&str> =
+                    owners.iter().filter(|x| *x != owner).map(|x| x.as_str()).collect();
+                out.push(Finding {
+                    project: String::new(),
+                    check: "duplicate-class-name",
+                    level: Level::Error,
+                    file: owner.clone(),
+                    line: 1,
+                    message: format!("class_name {} is declared by {} scripts", name, owners.len()),
+                    evidence: format!("also declared in {}", others.join(", ")),
+                });
+            }
+        }
+    }
+
     if o.wants("stale-import") {
         for (file, line, source) in &p.stale_imports {
             out.push(Finding {
@@ -160,6 +199,131 @@ pub fn run(p: &Project, o: &Options) -> Vec<Finding> {
     }
 
     crate::finding::sort(&mut out);
+    out
+}
+
+/// Repairs that follow from the project as it is, with no guessing involved.
+pub fn repairs(p: &Project, o: &Options) -> Vec<Fix> {
+    let mut out = Vec::new();
+    let dup = duplicate_uids(p);
+    let names = fix::by_name(p);
+    for r in &p.refs {
+        let path = match r.path.as_ref() {
+            Some(x) => x,
+            None => continue,
+        };
+        if !fix::rewritable(&r.raw, path) {
+            continue;
+        }
+        let uid_target = r.uid.as_ref().and_then(|u| p.uid_owner.get(u));
+        let uid_dup = r.uid.as_ref().map(|u| dup.contains_key(u)).unwrap_or(false);
+        if let Some(target) = uid_target {
+            if target != path && !uid_dup && o.wants("uid-path-mismatch") {
+                out.push(Fix {
+                    check: "uid-path-mismatch",
+                    file: r.from.clone(),
+                    line: r.line,
+                    old: r.raw.clone(),
+                    new: target.clone(),
+                    reason: format!(
+                        "{} already resolves to {}",
+                        r.uid.clone().unwrap_or_default(),
+                        target
+                    ),
+                });
+            }
+            continue;
+        }
+        if p.exists(path) {
+            continue;
+        }
+        if let Some(real) = p.case_variant(path) {
+            if o.wants("case-mismatch") {
+                out.push(Fix {
+                    check: "case-mismatch",
+                    file: r.from.clone(),
+                    line: r.line,
+                    old: r.raw.clone(),
+                    new: real.clone(),
+                    reason: "the file on disk is spelled that way".into(),
+                });
+            }
+            continue;
+        }
+        if o.wants("missing-resource") {
+            if let Some(base) = path.rsplit('/').next() {
+                if let Some(list) = names.get(base) {
+                    if list.len() == 1 {
+                        out.push(Fix {
+                            check: "missing-resource",
+                            file: r.from.clone(),
+                            line: r.line,
+                            old: r.raw.clone(),
+                            new: list[0].clone(),
+                            reason: format!("{} is the only file named {}", list[0], base),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| (&a.file, a.line, &a.old).cmp(&(&b.file, b.line, &b.old)));
+    out.dedup();
+    out
+}
+
+fn normalize_node_path(raw: &str) -> String {
+    let t = raw.trim();
+    let t = t.strip_prefix("./").unwrap_or(t);
+    if t.is_empty() {
+        ".".to_string()
+    } else {
+        t.trim_end_matches('/').to_string()
+    }
+}
+
+fn broken_connections(p: &Project, _o: &Options) -> Vec<Finding> {
+    let mut out = Vec::new();
+    let mut resolver = Resolver::new(p);
+    let scenes: Vec<String> = p
+        .scenes
+        .iter()
+        .filter(|(_, s)| !s.connections.is_empty())
+        .map(|(k, _)| k.clone())
+        .collect();
+    for res in scenes {
+        let tree = resolver.tree(&res);
+        if tree.unresolved {
+            continue;
+        }
+        let conns = match p.scenes.get(&res) {
+            Some(s) => s.connections.clone(),
+            None => continue,
+        };
+        for c in conns {
+            for (label, raw) in [("from", &c.from), ("to", &c.to)] {
+                let path = normalize_node_path(raw);
+                if !judgeable(&path) || !tree.is_missing(&path) {
+                    continue;
+                }
+                out.push(Finding {
+                    project: String::new(),
+                    check: "broken-connection",
+                    level: Level::Error,
+                    file: res.clone(),
+                    line: c.line,
+                    message: format!(
+                        "signal \"{}\" is connected {} \"{}\", which is not a node in this scene",
+                        c.signal, label, raw
+                    ),
+                    evidence: format!(
+                        "the engine drops a connection it cannot resolve without saying so, so {}() is never called",
+                        c.method
+                    ),
+                });
+            }
+        }
+    }
     out
 }
 

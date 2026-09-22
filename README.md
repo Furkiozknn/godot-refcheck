@@ -1,11 +1,17 @@
+![godot-refcheck - finds broken resource references and dead signal connections in Godot projects, and repairs what can be proved](assets/banner.svg)
+
 # godot-refcheck
 
-![godot-refcheck](assets/banner.svg)
-
-Find broken resource references in a Godot project without opening the editor.
+**Find broken resource references in a Godot project without opening the editor — and repair the ones that have a single provable answer.**
 
 [![CI](https://github.com/Furkiozknn/godot-refcheck/actions/workflows/ci.yml/badge.svg)](https://github.com/Furkiozknn/godot-refcheck/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Furkiozknn/godot-refcheck?label=release&color=c9a961)](https://github.com/Furkiozknn/godot-refcheck/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![No dependencies](https://img.shields.io/badge/dependencies-none-lightgrey)](Cargo.toml)
+
+![godot-refcheck finding three broken references in a Godot project, repairing them with --fix, and finding nothing on the next run](assets/demo.gif)
+
+<sub>Real output from <code>tests/projects/moved</code>, a fixture in this repository: an asset folder was moved and the references were not. Three findings, three repairs, then a clean run. The engine agrees — <code>tools/verify_with_godot.py</code> hands the same project to a headless Godot before and after.</sub>
 
 A scene loses a texture, a script preloads a file somebody renamed, two copied
 files end up with the same `uid://`, a folder is `Art/` on one machine and

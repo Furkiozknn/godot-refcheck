@@ -32,7 +32,7 @@
     "static-analysis",
     "zero-dependency"
   ],
-  "summary": "Godot tells you a resource reference is broken only when that scene loads - often in an exported build on someone else's machine. godot-refcheck reads the project files directly and reports every reference the engine could not satisfy: missing paths, case-only differences that break outside Windows, unknown and duplicated uid://, undeclared ExtResource ids and leftover .import metadata. One binary, no dependencies, Godot 3 and 4.",
+  "summary": "Godot reports a broken resource reference only when that scene loads, often in an exported build on another machine. godot-refcheck reads the project files instead: missing paths, case-only differences that break outside Windows, unknown and duplicated uid://, undeclared ExtResource ids, stale .import metadata.",
   "key_features": [
     "Eight checks over .tscn, .tres, project.godot, .import, plugin.cfg, GDScript and shaders, in both the Godot 3 and Godot 4 formats",
     "Every check is compared with a real headless Godot by tools/verify_with_godot.py; six have a matching engine message and the other two are documented as static-only",

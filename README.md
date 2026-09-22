@@ -89,11 +89,24 @@ out produced findings on code that ships:
   harness reaching into a scene it had just instantiated.
 - A node some script names at run time (`alet.name = "Aletler"` then
   `add_child`) is never called missing. That was the last false positive left
-  across five real projects, and it was in a game that works.
+  across the five Godot projects on this account, and it was in a game that
+  works.
+- A node whose name is some scene's **root** name is treated the same way,
+  because `add_child(scene.instantiate())` gives the child exactly that name
+  and the call site rarely says which scene: `$Combatants/Player` in
+  `godot-demo-projects` takes its `PackedScene` as a parameter.
+- A path the script guards with `has_node("…")` is not judged at all. The
+  author has already said it is optional.
 
-Across the five Godot projects on this account — 850-odd files — it reports
-nothing. That is the result it should give on code that runs; the fixture
-under `tests/projects/nodepath` is where it is proved to bite.
+The last two rules were not guesses. Running the check over the corpus —
+eleven maintained third-party repositories, 237 projects — produced 15 node
+findings, and five of them were wrong for those two reasons. With the rules in
+place the corpus reports **nine**, each one confirmed by hand and listed in
+[docs/corpus.md](docs/corpus.md); the same defect in the official demo
+projects survives on both the 4.x and the 3.x branch. Across the five Godot
+projects on this account — 850-odd files — it reports nothing, which is the
+result code that runs should get; the fixture under `tests/projects/nodepath`
+is where it is proved to bite.
 
 References are collected from `.tscn`, `.tres`, `.escn`, `project.godot`,
 `.import`, `plugin.cfg`, `.gd`/`.cs` (`preload()` and `load()` with a literal
@@ -265,7 +278,7 @@ godot 4.4.1-stable as the reference implementation
 
 **Working projects are the other reference.** `tools/corpus.py` scans eleven
 real repositories — 237 projects, 19,305 files, 6,904 references, 2,741 signal
-connections and 880 `class_name` declarations. It reports 41 findings in total,
+connections and 880 `class_name` declarations. It reports 50 findings in total,
 every one of them checked by hand and real; nothing else in those projects
 produces a finding, and `--fix-dry-run` proposes no change anywhere in them.
 [docs/corpus.md](docs/corpus.md) lists each one. Shapes that look broken and are
@@ -276,18 +289,24 @@ dead `[locale]` block Godot 3 leaves behind,
 `ExtResource( 1 )` — are all carried in the test suite as named regression
 tests, because each of them once produced a false finding here.
 
-`cargo test` runs 107 tests, all offline.
+`cargo test` runs 133 tests, all offline.
 
 ## Limitations
 
 - A path built at run time (`load("res://levels/" + name + ".tscn")`,
   `get_node("lvl" + n)`) cannot be resolved statically and is deliberately
   ignored rather than guessed at.
-- A node created with `add_child` at run time is in no scene file. If some
-  script names it (`n.name = "Aletler"`), `missing-node-path` stays silent
-  about paths reaching that name anywhere in the project — which is coarse,
-  and deliberately so: a false error in a tool like this costs more than a
-  missed one.
+- A node created with `add_child` at run time is in no scene file, and it gets
+  its name one of two ways: a script assigns it (`n.name = "Aletler"`), or a
+  scene is instantiated and the child takes that scene's root name. So
+  `missing-node-path` stays silent about a missing segment spelled like either
+  — anywhere in the project. That is coarse, and deliberately so: which scene a
+  call site instantiates is usually not knowable statically, because it arrives
+  as a `PackedScene` parameter or out of an exported array. A false error in a
+  tool like this costs more than a missed one.
+- A path the script itself guards with `has_node("…")` is not reported. The
+  author has already said the node is optional; the engine returns `null` and
+  the guarded branch is simply not entered.
 - `$"quoted"` and `%UniqueName` are not judged: the first can hold anything,
   and the second is resolved by owner rather than by path.
 - `unused-asset` is advisory and off by default: an asset reached only through a

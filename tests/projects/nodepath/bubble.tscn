@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://cnpbubbleaaaaa"]
+
+[node name="Bubble" type="Control"]
+
+[node name="Text" type="Label" parent="."]
+text = "hi"

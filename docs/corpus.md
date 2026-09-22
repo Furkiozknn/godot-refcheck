@@ -9,20 +9,20 @@ branch unless a branch is named.
 
 | repository | projects | files | references | findings |
 | --- | ---: | ---: | ---: | ---: |
-| godotengine/godot-demo-projects | 139 | 4,040 | 2,023 | 6 |
-| godotengine/godot-demo-projects@3.x | 89 | 2,257 | 1,452 | 10 |
+| godotengine/godot-demo-projects | 139 | 4,040 | 2,023 | 9 |
+| godotengine/godot-demo-projects@3.x | 89 | 2,257 | 1,452 | 12 |
 | godotengine/godot-benchmarks | 1 | 896 | 73 | 0 |
 | Orama-Interactive/Pixelorama | 1 | 1,380 | 684 | 0 |
-| RodZill4/material-maker | 1 | 2,912 | 997 | 20 |
+| RodZill4/material-maker | 1 | 2,912 | 997 | 24 |
 | mbrlabs/Lorien | 1 | 212 | 133 | 0 |
 | GDQuest/godot-open-rpg | 1 | 1,373 | 643 | 5 |
 | Maaack/godot-game-template | 1 | 740 | 356 | 0 |
 | Maaack/Godot-Menus-Template | 1 | 593 | 215 | 0 |
 | MakovWait/godots | 1 | 4,070 | 174 | 0 |
 | bitbrain/beehave | 1 | 832 | 154 | 0 |
-| **total** | **237** | **19,305** | **6,904** | **41** |
+| **total** | **237** | **19,305** | **6,904** | **50** |
 
-41 findings: 26 errors and 15 warnings. Each one was checked by hand against
+50 findings: 35 errors and 15 warnings. Each one was checked by hand against
 the repository it came from, and each one is a real defect. No other reference
 in those 6,904 produced a finding, none of the 2,741 signal connections in these
 projects was wrongly called broken, none of the 880 `class_name` declarations
@@ -58,6 +58,23 @@ count reaches sixteen.
 | material-maker `brush_pattern.gdshader` | `#include "…/brush_common_decl.shader"`; the file is `brush_common_decl.gdshader` — the include kept the Godot 3 extension | the directory listing: only the `.gdshader` exists |
 | material-maker `brush_stamp.gdshader` | same include, same shader directory | same |
 | material-maker `brush_uv_pattern.gdshader` | same include, same shader directory | same |
+
+## The nine node paths
+
+`missing-node-path` reads `$Head/Body` and `get_node("Head/Body")` out of a
+script and resolves them against the scene the script is attached to. These
+nine are all the same defect: the scene was reorganised and the script was not.
+
+| project | finding | confirmed by |
+| --- | --- | --- |
+| `2d/finite_state_machine` (4.x and 3.x) | `$States/Stagger` | `player/Player.tscn` has `StateMachine/Stagger`; there is no `States` node |
+| `2d/finite_state_machine` (4.x and 3.x) | `$Health` | `Player.tscn` has no `Health` node at all, and no scene in that project is rooted at one |
+| `compute/heightmap` | `$CenterContainer/…/HBoxContainer2/Label2` | `main.tscn` has `HBoxContainer` under that parent, not `HBoxContainer2`; the line only runs when `RenderingDevice` is unavailable |
+| material-maker `panels/paint/paint.gd` (5 lines) | `$…/Painter/Options`, `…/Options/OptionsPanel`, `…/Options/Buttons` | `paint.tscn` has `Painter/OptionsPanel` directly; there is no `Options` container between them |
+
+Each takes a `null` from the engine and dies on the next line, on whichever
+branch reaches it — which is why they survive in working projects: none of
+these lines is on a path the demo normally takes.
 
 ## The fifteen warnings
 
@@ -117,6 +134,9 @@ unit tests.
 | `from="FromBase"` in an inherited scene | `godot-game-template` and others | the node comes from the scene this one inherits from |
 | a connection under an `instance_placeholder` | deferred loading | the subtree only exists at run time |
 | `method="set_h_offset"` | `godot-demo-projects` | a signal wired to a built-in method, which is why the method is not checked at all |
+| `$Combatants/Player` | `2d/role_playing_game` | the child is `add_child`ed from a `PackedScene` whose root node is named `Player`; the call site takes the scene as a parameter, so no static tool can tie it to one file |
+| `get_node("PreviewViewport")` | material-maker | `tools/share/preview_viewport.tscn` is rooted at `PreviewViewport` and instantiated into place two lines above |
+| `if has_node("TextBubbleLayer")` | `godot-open-rpg`, vendored dialogic | the script tests for the node before using it: absence is the documented case, not a defect |
 
 ## Reproducing
 

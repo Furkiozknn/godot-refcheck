@@ -88,6 +88,16 @@ pub struct Project {
     /// Every name a script gives a node it creates (`x.name = "Aletler"`).
     /// A node built at run time is in no scene file; see `assigned_node_names`.
     pub runtime_node_names: BTreeSet<String>,
+    /// The root node name of every scene in the project.
+    ///
+    /// `add_child(preload("res://x.tscn").instantiate())` gives the new child
+    /// the name of THAT scene's root node, and the call site usually cannot be
+    /// tied to a particular scene statically - it arrives as a `PackedScene`
+    /// parameter, or through an exported array. So a missing segment spelled
+    /// like some scene's root is a node that may well be there at run time.
+    pub scene_root_names: BTreeSet<String>,
+    /// script res:// path -> the node paths it guards with `has_node(...)`.
+    pub script_guarded_paths: BTreeMap<String, BTreeSet<String>>,
     /// source asset -> the res:// paths its importer produces outside `.godot/`.
     pub import_products: BTreeMap<String, Vec<String>>,
     pub unreadable: Vec<String>,
@@ -469,6 +479,9 @@ impl Project {
                                 }
                             };
                             current_node = Some(path);
+                            if is_root && !name.is_empty() {
+                                self.scene_root_names.insert(name.clone());
+                            }
                             scene.nodes.push(NodeDecl {
                                 name,
                                 parent: if is_root { None } else { parent },
@@ -536,10 +549,18 @@ impl Project {
     fn read_script(&mut self, res: &str, src: &str) {
         if res.ends_with(".gd") {
             self.runtime_node_names.extend(gdscript::assigned_node_names(src));
-            let claims: Vec<(usize, String)> = gdscript::node_paths(src)
+            let guarded = gdscript::guarded_node_paths(src);
+            if !guarded.is_empty() {
+                self.script_guarded_paths.insert(res.to_string(), guarded.into_iter().collect());
+            }
+            // One line can write the same path twice
+            // (`$A/B.x = -$A/B.y`); that is one claim to judge, not two.
+            let mut claims: Vec<(usize, String)> = gdscript::node_paths(src)
                 .into_iter()
                 .map(|(off, path)| (cfgfile::line_of(src, off), path))
                 .collect();
+            claims.sort();
+            claims.dedup();
             if !claims.is_empty() {
                 self.script_node_paths.insert(res.to_string(), claims);
             }

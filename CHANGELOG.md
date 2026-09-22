@@ -12,15 +12,23 @@
   `[connection]` blocks and 145 `.connect(` call sites in GDScript. `$Head/Body`
   is the same claim in the place it is actually made.
 
-  Two rules were added only after measuring, and each removed findings from
+  Four rules were added only after measuring, and each removed findings from
   code that ships. Ignoring the receiver of `get_node` produced 132 findings on
   one game — a headless test harness asking a scene it had just instantiated.
-  Calling a run-time node missing produced the last one: a game builds its
-  tool strip with `alet.name = "Aletler"` and `add_child`, so no `.tscn`
-  mentions it. Across five real projects the check now reports nothing, which
-  is the answer code that runs should get.
+  Calling a run-time node missing produced the last one on this account: a game
+  builds its tool strip with `alet.name = "Aletler"` and `add_child`, so no
+  `.tscn` mentions it.
 
-- 107 -> 128 tests.
+  The other two came from the corpus — eleven maintained third-party
+  repositories — which the check had not been run against when it was written.
+  It produced 15 node findings there and five were wrong: a child added with
+  `add_child(scene.instantiate())` carries that scene's ROOT name, and a path
+  the script guards with `has_node("…")` is optional by the author's own
+  statement. The corpus now reports nine, each confirmed by hand. The same run
+  found a cosmetic defect too: `$A/B.x = -$A/B.y` was printed twice, because
+  two offsets on one line are still one claim.
+
+- 107 -> 133 tests. Corpus findings 41 -> 50, all nine new ones real.
 
 ## 0.2.0
 

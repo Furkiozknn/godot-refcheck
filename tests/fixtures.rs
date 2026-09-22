@@ -380,6 +380,39 @@ fn a_node_some_script_names_at_run_time_is_not_called_missing() {
 }
 
 #[test]
+fn a_child_that_is_an_instanced_scene_carries_that_scenes_root_name() {
+    // `add_child(load("res://bubble.tscn").instantiate())` names the child
+    // "Bubble" - bubble.tscn's root. Which scene a call site instantiates is
+    // usually not knowable statically (a variable here, a PackedScene
+    // parameter in godot-demo-projects, an exported array in dialogic), so a
+    // missing segment spelled like SOME scene's root buys silence.
+    let f = of(&scan("nodepath"), "missing-node-path");
+    assert!(!f.iter().any(|x| x.message.contains("Bubble")), "{:#?}", f);
+}
+
+#[test]
+fn a_path_the_script_guards_with_has_node_is_left_alone() {
+    // `if has_node("Optional"): get_node("Optional")` is the author stating
+    // the node is optional. The engine returns null and the branch is not
+    // entered; reporting it repeats what the code already says.
+    let f = of(&scan("nodepath"), "missing-node-path");
+    assert!(!f.iter().any(|x| x.message.contains("Optional")), "{:#?}", f);
+}
+
+#[test]
+fn the_same_path_written_twice_on_one_line_is_one_finding() {
+    // `$A/B.x = -$A/B.y` is one claim to judge. Counting the offsets rather
+    // than the (line, path) pairs printed material-maker's paint.gd:910
+    // twice, word for word.
+    let src = "extends Node\nfunc f():\n\t$Yok.a = -$Yok.b\n";
+    let claims = godot_refcheck::parse::gdscript::node_paths(src);
+    let lines: std::collections::BTreeSet<(usize, String)> =
+        claims.iter().map(|(_, p)| (0usize, p.clone())).collect();
+    assert_eq!(claims.len(), 2, "both offsets are found: {:#?}", claims);
+    assert_eq!(lines.len(), 1, "but they are one claim: {:#?}", lines);
+}
+
+#[test]
 fn a_path_asked_of_another_node_is_not_this_scenes_business() {
     // `other.get_node("Nope")` is written against whatever `other` is. On one
     // shipped game, ignoring the receiver produced 132 findings - every one a

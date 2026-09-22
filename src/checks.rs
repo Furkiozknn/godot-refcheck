@@ -372,7 +372,13 @@ fn missing_node_paths(p: &Project) -> Vec<Finding> {
             Some(h) if !h.is_empty() => h.clone(),
             _ => continue,
         };
+        // `if has_node("X"): get_node("X")` is the author saying X is optional.
+        // Reporting it repeats what the code already states.
+        let guarded = p.script_guarded_paths.get(script);
         for (line, claim) in claims {
+            if guarded.is_some_and(|g| g.contains(claim)) {
+                continue;
+            }
             let mut judged = 0usize;
             let mut missing = 0usize;
             let mut example = String::new();
@@ -427,13 +433,21 @@ fn missing_node_paths(p: &Project) -> Vec<Finding> {
 /// `Dokunmatik`, and `Aletler` is a `VBoxContainer` built in `_ready` with
 /// `alet.name = "Aletler"` and added under it. Nothing in the files can prove
 /// that node is absent, so the tool must not say it is.
+/// Is the first segment the scene does not have a node that only exists once
+/// the game is running?
+///
+/// Two ways a node gets a name no `.tscn` carries: a script names it
+/// (`alet.name = "Aletler"`), or a scene is instantiated and added, in which
+/// case the child takes that scene's ROOT name. Both are coarse on purpose -
+/// a name matching anywhere in the project buys silence - because a false
+/// error in a tool like this costs more than a missed one.
 fn built_at_runtime(p: &Project, tree: &crate::scene::Tree, path: &str) -> bool {
     let parts: Vec<&str> = path.split('/').collect();
     let mut prefix = String::new();
     for part in parts {
         prefix = if prefix.is_empty() { part.to_string() } else { format!("{}/{}", prefix, part) };
         if tree.is_missing(&prefix) {
-            return p.runtime_node_names.contains(part);
+            return p.runtime_node_names.contains(part) || p.scene_root_names.contains(part);
         }
     }
     false

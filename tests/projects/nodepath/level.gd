@@ -29,6 +29,18 @@ func _ready() -> void:
 	# %Benzersiz sahibine gore cozuluyor, yola gore degil.
 	%Benzersiz.hide()
 
+	# Bir sahne ornekleniyor ve ekleniyor: cocugun adi O sahnenin kokunun
+	# adi olur. Cagri yerinden hangi sahne oldugu statik olarak bilinemez
+	# (buradaki gibi degiskenden, ya da PackedScene parametresinden gelir).
+	var sahne := load("res://bubble.tscn")
+	add_child(sahne.instantiate())
+	$Bubble.hide()
+
+	# Betigin kendisi "olmayabilir" diyor: has_node ile korunan bir yol,
+	# yazarin zaten bildigi bir eksiklik.
+	if has_node("Optional"):
+		get_node("Optional").hide()
+
 	# BILDIRILECEK IKI SATIR.
 	$Yok.hide()
 	get_node("Panel/Gitti").hide()

@@ -355,6 +355,43 @@ pub fn icon_annotation(src: &str) -> Option<(usize, String)> {
     None
 }
 
+/// Paths the script itself declares optional: `if has_node("TextBubbleLayer")`.
+///
+/// `has_node` is how GDScript asks "is this node here?", so a path that a
+/// script tests before using is a path the author already knows may be
+/// absent. Reporting it says nothing the code does not already say; the
+/// engine returns null and the guarded branch is never entered.
+///
+/// Same receiver rule as `get_node`: `other.has_node(...)` asks a different
+/// node and settles nothing about this one.
+pub fn guarded_node_paths(src: &str) -> Vec<String> {
+    let toks = lex(src);
+    let mut out = Vec::new();
+    for (i, w) in toks.windows(4).enumerate() {
+        if let (Tok::Ident(name), Tok::Punct('('), Tok::Str { value, .. }, tail) =
+            (&w[0], &w[1], &w[2], &w[3])
+        {
+            if name != "has_node" {
+                continue;
+            }
+            if i > 0 && toks[i - 1] == Tok::Punct('.') {
+                let is_self = i > 1 && toks[i - 2] == Tok::Ident("self".to_string());
+                if !is_self {
+                    continue;
+                }
+            }
+            if matches!(tail, Tok::Punct(')') | Tok::Punct(',')) {
+                if let Some(path) = normalise_node_path(value) {
+                    out.push(path);
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -524,6 +561,20 @@ mod tests {
     fn asking_whether_a_node_exists_is_not_a_claim_that_it_does() {
         assert!(paths("if has_node(\"Head\"): pass\n").is_empty());
         assert!(paths("var n = get_node_or_null(\"Head\")\n").is_empty());
+    }
+
+    #[test]
+    fn has_node_names_the_paths_the_script_treats_as_optional() {
+        assert_eq!(guarded_node_paths("if has_node(\"Bubble\"): pass\n"), ["Bubble"]);
+        assert_eq!(guarded_node_paths("if self.has_node(\"A/B\"): pass\n"), ["A/B"]);
+    }
+
+    #[test]
+    fn has_node_asked_of_another_node_guards_nothing_here() {
+        // Same receiver rule as `get_node`: `other.has_node("X")` settles
+        // whether X is under `other`, not under this script's node.
+        assert!(guarded_node_paths("if oyun.has_node(\"X\"): pass\n").is_empty());
+        assert!(guarded_node_paths("if has_node(name): pass\n").is_empty());
     }
 
     #[test]

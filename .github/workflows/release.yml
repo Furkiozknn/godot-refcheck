@@ -107,3 +107,62 @@ jobs:
           set -eu
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY"
+
+  # cargo install godot-refcheck, for people who would rather not download a
+  # binary. It stays switched off until the repository variable CRATES_IO is
+  # set to "on", because crates.io cannot accept a trusted publisher for a
+  # crate that has never been published, and a job that is certain to fail is
+  # worse than no job. Once the crate exists and its trusted publisher points
+  # at this workflow, flipping that variable is the whole of the setup.
+  #
+  # No third-party action is used here for the same reason as everywhere else
+  # in this file: the OIDC exchange is three HTTP calls, and the token is
+  # revoked at the end whether or not the publish succeeded.
+  crates:
+    needs: build
+    if: vars.CRATES_IO == 'on'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: The tag and Cargo.toml have to agree
+        run: |
+          set -eu
+          want="${TAG#v}"
+          have="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [ "$want" != "$have" ]; then
+            echo "tag says $want, Cargo.toml says $have" >&2
+            exit 1
+          fi
+          echo "both say $have"
+
+      - name: Borrow a token from crates.io with this workflow's identity
+        id: auth
+        run: |
+          set -eu
+          jwt="$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=crates.io" \
+            | python3 -c 'import json,sys;print(json.load(sys.stdin)["value"])')"
+          token="$(curl -sS -X POST https://crates.io/api/v1/trusted_publishing/tokens \
+            -H 'Content-Type: application/json' \
+            -H 'User-Agent: godot-refcheck-release' \
+            -d "$(python3 -c 'import json,sys;print(json.dumps({"jwt":sys.argv[1]}))' "$jwt")" \
+            | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])')"
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+      - name: Publish
+        run: cargo publish --locked --token '${{ steps.auth.outputs.token }}'
+
+      - name: Give the token back
+        if: always() && steps.auth.outputs.token != ''
+        run: |
+          curl -sS -X DELETE https://crates.io/api/v1/trusted_publishing/tokens \
+            -H 'Authorization: Bearer ${{ steps.auth.outputs.token }}' \
+            -H 'User-Agent: godot-refcheck-release' >/dev/null
+          echo "revoked"

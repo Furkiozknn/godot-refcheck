@@ -112,7 +112,7 @@ jobs:
   refcheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: Furkiozknn/godot-refcheck@v0.1.0
         with:
           path: .

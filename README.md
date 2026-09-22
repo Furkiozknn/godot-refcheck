@@ -112,7 +112,7 @@ jobs:
   refcheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: Furkiozknn/godot-refcheck@v0.1.0
         with:
           path: .
@@ -129,7 +129,7 @@ scanning and appear inline on the changed lines of a pull request:
         with:
           sarif: refcheck.sarif
           fail-on: never
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: refcheck.sarif
 ```

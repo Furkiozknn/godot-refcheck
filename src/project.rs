@@ -67,6 +67,9 @@ pub struct Project {
     pub root: PathBuf,
     /// res:// paths present on disk.
     pub files: BTreeSet<String>,
+    /// res:// paths on disk under a `.gdignore`d directory: they exist, but
+    /// Godot never scans them, so nothing in them is read.
+    pub ignored: BTreeSet<String>,
     /// lowercase res:// path -> the real spelling on disk.
     pub lower: HashMap<String, String>,
     /// res:// paths that no importer writes to disk but the engine can still load
@@ -121,7 +124,14 @@ pub fn find_project_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+/// Files under a `.gdignore`d directory: present on disk, never parsed.
+fn walk_present(dir: &Path, out: &mut Vec<PathBuf>) {
+    let mut sink = Vec::new();
+    walk(dir, out, &mut sink);
+    out.append(&mut sink);
+}
+
+fn walk(dir: &Path, out: &mut Vec<PathBuf>, ignored: &mut Vec<PathBuf>) {
     let rd = match fs::read_dir(dir) {
         Ok(r) => r,
         Err(_) => return,
@@ -142,7 +152,20 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
             if SKIP_DIRS.contains(&name.as_str()) {
                 continue;
             }
-            walk(&p, out);
+            // Godot does not scan a directory holding a `.gdignore` file, or
+            // anything under it: nothing there is imported, given a uid or
+            // registered as a class. Reading it anyway turned a kept-aside
+            // copy of a sample project (KoBeWi/Metroidvania-System,
+            // `Extensions/`) into fifteen duplicate-uid and
+            // duplicate-class-name errors. The files are still on disk,
+            // though, and a load by path still finds them in the editor
+            // (material-maker's demo scenes load `examples/*.ptex` that way),
+            // so they are collected as present - just never read.
+            if p.join(".gdignore").is_file() {
+                walk_present(&p, ignored);
+                continue;
+            }
+            walk(&p, out, ignored);
         } else if ft.is_file() {
             out.push(p);
         }
@@ -284,7 +307,7 @@ fn is_text(bytes: &[u8]) -> bool {
 
 impl Project {
     pub fn exists(&self, res: &str) -> bool {
-        self.files.contains(res) || self.generated.contains(res)
+        self.files.contains(res) || self.generated.contains(res) || self.ignored.contains(res)
     }
 
     pub fn case_variant(&self, res: &str) -> Option<&String> {
@@ -298,8 +321,15 @@ impl Project {
     pub fn load(root: &Path) -> Project {
         let mut pr = Project { root: root.to_path_buf(), ..Default::default() };
         let mut disk = Vec::new();
-        walk(root, &mut disk);
+        let mut ignored = Vec::new();
+        walk(root, &mut disk, &mut ignored);
 
+        for p in &ignored {
+            if let Some(res) = to_res(root, p) {
+                pr.lower.entry(res.to_ascii_lowercase()).or_insert_with(|| res.clone());
+                pr.ignored.insert(res);
+            }
+        }
         for p in &disk {
             if let Some(res) = to_res(root, p) {
                 pr.lower.entry(res.to_ascii_lowercase()).or_insert_with(|| res.clone());

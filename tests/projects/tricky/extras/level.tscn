@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://clevelsceneaa"]
+
+[ext_resource type="Texture2D" path="res://art/not_here.png" id="1"]
+
+[node name="Level" type="Node2D"]
+
+[node name="Sprite" type="Sprite2D" parent="."]
+texture = ExtResource("1")

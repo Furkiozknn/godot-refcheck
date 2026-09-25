@@ -18,6 +18,7 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # olculen en uzun kosu 6 sn
     steps:
       - uses: actions/checkout@v7
         with:
@@ -45,6 +46,7 @@ jobs:
     needs: prepare
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10  # olculen en uzun kosu 62 sn
     strategy:
       fail-fast: false
       matrix:
@@ -106,6 +108,7 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # olculen en uzun kosu 5 sn
     steps:
       - name: Every platform is attached, so make the release visible
         env:
@@ -129,6 +132,7 @@ jobs:
     needs: build
     if: vars.CRATES_IO == 'on'
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # olculmedi: hic kosmadi; cargo publish derler, surum derlemeleri 20-62 sn
     permissions:
       contents: read
       id-token: write

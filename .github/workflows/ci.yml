@@ -17,6 +17,7 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10  # olculen en uzun kosu 57 sn
     strategy:
       fail-fast: false
       matrix:
@@ -52,6 +53,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # olculen en uzun kosu 11 sn
     steps:
       - uses: actions/checkout@v7
       - run: cargo fmt --check
@@ -60,6 +62,7 @@ jobs:
   action:
     name: the action checks this repository
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # olculen en uzun kosu 24 sn
     steps:
       - uses: actions/checkout@v7
       - id: refcheck
@@ -91,6 +94,7 @@ jobs:
   oracle:
     name: agree with the engine
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # olculen en uzun kosu 140 sn
     steps:
       - uses: actions/checkout@v7
       - run: cargo build --release
@@ -100,6 +104,7 @@ jobs:
   sarif:
     name: code scanning
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # olculen en uzun kosu 31 sn
     if: github.event_name == 'push'
     permissions:
       contents: read
@@ -124,6 +129,7 @@ jobs:
   action-smoke:
     name: the action's shell, step by step
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # olculen en uzun kosu 37 sn
     steps:
       - uses: actions/checkout@v7
       - run: cargo build --release

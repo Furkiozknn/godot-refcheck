@@ -112,3 +112,16 @@ jobs:
         with:
           sarif_file: refcheck.sarif
           category: godot-refcheck
+
+  # tools/action_smoke.py runs action.yml's own shell against the fixtures,
+  # including the install step with a stand-in for the release download. It
+  # existed but ran nowhere, so the Action's download path had silently fallen
+  # back to a source build on every Linux and macOS runner.
+  action-smoke:
+    name: the action's shell, step by step
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo build --release
+      - run: python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --quiet --break-system-packages pyyaml
+      - run: python3 tools/action_smoke.py target/release/godot-refcheck

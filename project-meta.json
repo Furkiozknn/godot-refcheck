@@ -34,11 +34,11 @@
   ],
   "summary": "Godot reports a broken resource reference only when that scene loads, and a dead signal connection never at all. godot-refcheck reads the project files instead: missing paths, case-only breakage, uid problems, connections to nodes that are gone. It repairs the ones with a single provable answer.",
   "key_features": [
-    "Eleven checks over .tscn, .tres, project.godot, .import, plugin.cfg, GDScript and shaders, in both the Godot 3 and Godot 4 formats",
+    "Twelve checks over .tscn, .tres, project.godot, .import, plugin.cfg, GDScript and shaders, in both the Godot 3 and Godot 4 formats",
     "Node paths resolve through instanced, inherited and placeholder scenes, so a dead signal connection is found without ever calling a healthy one broken",
     "A script reaching for $Head/Body the scene does not contain is an error, and stays silent on the six things that made it wrong: another node's get_node, a run-time add_child, a child that carries an instanced scene's root name, a path the script guards with has_node, a unique name, a script no scene attaches",
     "--fix repairs in place what the project itself settles: a moved file, a case-only difference, a uid that already resolves; two files with the same name produce no repair",
-    "Verified against a headless Godot: eight engine-confirmed cases and two repair round trips where the engine errors before --fix and is silent after",
+    "Verified against a headless Godot: nine engine-confirmed cases and two repair round trips where the engine errors before --fix and is silent after",
     "Calibrated on 237 projects in eleven real repositories: 50 findings, each confirmed by hand, no change proposed anywhere"
   ],
   "media": {
@@ -50,8 +50,8 @@
     "videos": []
   },
   "tests": {
-    "count": 137,
-    "source": "CI log: `=== 137 tests passed ===`",
+    "count": 147,
+    "source": "CI log: `=== 147 tests passed ===`",
     "measured": "2026-09-25"
   },
   "ci": {
@@ -67,7 +67,7 @@
     "changelog": "CHANGELOG.md",
     "version_history": null,
     "roadmap": null,
-    "security": null,
+    "security": "SECURITY.md",
     "contributing": null,
     "license_file": "LICENSE"
   },

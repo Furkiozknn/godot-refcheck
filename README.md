@@ -223,7 +223,8 @@ Inputs: `path`, `recursive`, `unused`, `only`, `skip`, `fail-on`, `sarif`,
 The action runs the release binary for the runner's platform, and only after
 checking the archive against the `.sha256` published next to it; an archive
 that does not match stops the step. On a platform without a published binary
-it builds from source, which needs a Rust toolchain on the runner.
+it builds from source, which needs a Rust toolchain on the runner. What the
+action downloads, runs and writes is listed in [SECURITY.md](SECURITY.md).
 
 With `sarif: refcheck.sarif` the findings can be uploaded to GitHub code
 scanning and appear inline on the changed lines of a pull request:
@@ -301,7 +302,7 @@ dead `[locale]` block Godot 3 leaves behind,
 `ExtResource( 1 )` — are all carried in the test suite as named regression
 tests, because each of them once produced a false finding here.
 
-`cargo test` runs 137 tests, all offline.
+`cargo test` runs 147 tests, all offline.
 
 ## Limitations
 

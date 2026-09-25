@@ -22,7 +22,7 @@ that broke it.
 `godot-refcheck` reads the project files directly, resolves every reference the
 way the engine does, reports the ones that cannot be satisfied, and repairs the
 ones that have a single provable answer. It is a single binary with no runtime
-dependencies, it never launches the engine, and the 8,324 files of 141 projects —
+dependencies, it never launches the engine, and the 6,991 files it reads in 141 projects —
 the official demos, material-maker and godot-open-rpg — are scanned in about
 a second and a half on four cores.
 
@@ -218,6 +218,11 @@ Inputs: `path`, `recursive`, `unused`, `only`, `skip`, `fail-on`, `sarif`,
 `fix`, `fix-dry-run`, `baseline`, `version`. Outputs: `errors`, `warnings`,
 `notes`, `findings`, `repaired`.
 
+The action runs the release binary for the runner's platform, and only after
+checking the archive against the `.sha256` published next to it; an archive
+that does not match stops the step. On a platform without a published binary
+it builds from source, which needs a Rust toolchain on the runner.
+
 With `sarif: refcheck.sarif` the findings can be uploaded to GitHub code
 scanning and appear inline on the changed lines of a pull request:
 
@@ -278,7 +283,7 @@ godot 4.4.1-stable as the reference implementation
 ```
 
 **Working projects are the other reference.** `tools/corpus.py` scans eleven
-real repositories — 237 projects, 19,305 files, 6,904 references, 2,741 signal
+real repositories — 237 projects, 17,198 files, 6,904 references, 2,741 signal
 connections and 880 `class_name` declarations. It reports 50 findings in total,
 every one of them checked by hand and real; nothing else in those projects
 produces a finding, and `--fix-dry-run` proposes no change anywhere in them.
@@ -293,7 +298,7 @@ dead `[locale]` block Godot 3 leaves behind,
 `ExtResource( 1 )` — are all carried in the test suite as named regression
 tests, because each of them once produced a false finding here.
 
-`cargo test` runs 133 tests, all offline.
+`cargo test` runs 137 tests, all offline.
 
 ## Limitations
 

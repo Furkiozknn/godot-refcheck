@@ -159,7 +159,9 @@ fn a_godot_3_project_is_understood() {
 
 /// Everything in this project looks broken to a naive reader and is not:
 /// a dead Godot 3 `[locale]` block, locale-suffixed remaps, run-time paths,
-/// an editor-written `[replication]` block and a sub-resource path.
+/// an editor-written `[replication]` block, a sub-resource path, and a copy
+/// of the main scene - same uid, a reference to a missing file - kept in a
+/// directory Godot is told to skip with `.gdignore`.
 #[test]
 fn shapes_that_only_look_broken_produce_no_error() {
     let f = scan("tricky");
@@ -172,6 +174,16 @@ fn the_unused_scan_finds_the_one_asset_nothing_points_at() {
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].file, "res://dead/unused.tres");
     assert_eq!(f[0].level, Level::Info);
+}
+
+#[test]
+fn a_gdignored_directory_is_not_read() {
+    let p = Project::load(&project_dir("tricky"));
+    assert!(
+        p.files.iter().all(|f| !f.starts_with("res://extras/")),
+        "a file under a .gdignore'd directory was read"
+    );
+    assert!(p.refs.iter().all(|r| !r.from.starts_with("res://extras/")));
 }
 
 #[test]
@@ -450,4 +462,41 @@ fn the_check_can_be_skipped_like_any_other() {
     skip.insert("missing-node-path".to_string());
     let f = scan_with("nodepath", Options { skip, ..Options::default() });
     assert!(of(&f, "missing-node-path").is_empty());
+}
+
+/// popochiu generates its autoload scripts into a git-ignored `game/`, so a
+/// fresh clone has uid-only autoloads that resolve to nothing. Anywhere else
+/// the same reference is an error; next to a git-ignored directory it is a
+/// warning that says why. The rule is about uid-only project settings, not
+/// autoloads in particular, so the uid-only icon in the fixture gets the same
+/// treatment.
+#[test]
+fn a_uid_only_setting_next_to_a_gitignored_directory_is_a_warning() {
+    let f = of(&scan("generated"), "unknown-uid");
+    assert_eq!(f.len(), 2, "{:#?}", f);
+    for x in &f {
+        assert_eq!(x.level, Level::Warning);
+        assert!(x.evidence.contains("game/"), "{}", x.evidence);
+    }
+}
+
+#[test]
+fn a_uid_only_setting_is_still_an_error_without_a_gitignore() {
+    let f = of(&scan("broken"), "unknown-uid");
+    assert!(!f.is_empty());
+    assert!(f.iter().all(|x| x.level == Level::Error));
+}
+
+/// `directory_rules` keys are folders. The clean fixture sets one for
+/// `res://addons`, which exists, so the project stays clean. `is_dir` only
+/// answers yes for a folder that really holds files, so a misspelt folder
+/// is still reported as missing.
+#[test]
+fn a_setting_that_names_an_existing_directory_is_not_missing() {
+    assert!(of(&scan("clean"), "missing-resource").is_empty());
+    let p = Project::load(&project_dir("clean"));
+    assert!(p.is_dir("res://addons"));
+    assert!(p.is_dir("res://addons/"));
+    assert!(!p.is_dir("res://addon"));
+    assert!(!p.is_dir("res://icon.svg"));
 }

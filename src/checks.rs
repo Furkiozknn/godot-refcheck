@@ -121,17 +121,37 @@ pub fn run(p: &Project, o: &Options) -> Vec<Finding> {
             }
             (None, None) => {
                 if o.wants("unknown-uid") {
+                    // A uid-only project setting (an autoload written as
+                    // "*uid://...") carries no path. When the project keeps a
+                    // directory out of git, the file may be one a plugin
+                    // generates there - popochiu writes its autoloads into a
+                    // git-ignored `game/` - so a fresh clone cannot tell a
+                    // broken reference from an ungenerated one.
+                    let generated =
+                        r.kind == RefKind::ProjectSetting && !p.gitignored_dirs.is_empty();
+                    let (level, evidence) = if generated {
+                        (
+                            Level::Warning,
+                            format!(
+                                "{} - the project's .gitignore excludes {}; a file generated there would carry this uid in a working checkout",
+                                origin(r),
+                                p.gitignored_dirs.iter().map(|d| format!("{}/", d)).collect::<Vec<_>>().join(", ")
+                            ),
+                        )
+                    } else {
+                        (Level::Error, origin(r))
+                    };
                     out.push(Finding {
                         project: String::new(),
                         check: "unknown-uid",
-                        level: Level::Error,
+                        level,
                         file: r.from.clone(),
                         line: r.line,
                         message: format!(
                             "{} matches no file in the project and no path is given",
                             r.uid.clone().unwrap_or_default()
                         ),
-                        evidence: origin(r),
+                        evidence,
                     });
                 }
             }

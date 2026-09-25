@@ -14,6 +14,15 @@
   maker's demo scenes load `examples/*.ptex` that way) is not reported as
   missing. The corpus result is unchanged at 50; the file counts in
   `docs/corpus.md` are lower because those directories are no longer read.
+- **A uid-only project setting next to a git-ignored directory is a warning,
+  not an error.** carenalgas/popochiu's editor plugin writes its autoload
+  scripts into `game/`, which the repository's `.gitignore` excludes, so a
+  fresh clone has six `autoload` entries written as `"*uid://…"` that resolve
+  to nothing. Each one was an error. A uid carries no path, so there is no
+  telling from the clone whether the file is broken or just not generated yet.
+  The finding is now a warning that names the ignored directories. Without a
+  `.gitignore` excluding project content, it is still an error. The corpus
+  result is unchanged at 50.
 
 ## 0.3.0
 

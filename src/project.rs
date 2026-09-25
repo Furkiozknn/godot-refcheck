@@ -105,6 +105,10 @@ pub struct Project {
     pub import_products: BTreeMap<String, Vec<String>>,
     pub unreadable: Vec<String>,
     pub godot_version: Option<String>,
+    /// Directories inside the project that its own `.gitignore` excludes
+    /// (`game`, `builds`). A plugin that generates files there leaves
+    /// uid-only references that a fresh clone cannot resolve.
+    pub gitignored_dirs: Vec<String>,
 }
 
 const SKIP_DIRS: &[&str] = &[".godot", ".git", ".import", ".svn", ".hg", "node_modules", ".vs"];
@@ -122,6 +126,53 @@ pub fn find_project_root(start: &Path) -> Option<PathBuf> {
         cur = parent;
     }
     None
+}
+
+/// Plain directory names a `.gitignore` excludes: `/game`, `game/`,
+/// `/game/**`. Wildcards, negations, dotted names (files, or hidden
+/// directories such as `.godot`) are left out: the point is only to know
+/// whether generated project content is kept out of git.
+pub fn gitignored_dirs(src: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in src.lines() {
+        let l = line.trim();
+        if l.is_empty() || l.starts_with('#') || l.starts_with('!') {
+            continue;
+        }
+        let mut d = l.trim_start_matches('/');
+        for suffix in ["/**", "/*", "/"] {
+            if let Some(s) = d.strip_suffix(suffix) {
+                d = s;
+                break;
+            }
+        }
+        if d.is_empty() || d.contains(['*', '?', '[', '/', '.']) {
+            continue;
+        }
+        // Names every .gitignore template carries that never hold project
+        // content: OS litter, caches and export output.
+        const NOT_CONTENT: &[&str] = &[
+            "DS_Store",
+            "__pycache__",
+            "node_modules",
+            "build",
+            "builds",
+            "export",
+            "exports",
+            "dist",
+            "bin",
+            "obj",
+            "mono",
+            "android",
+        ];
+        if NOT_CONTENT.contains(&d) {
+            continue;
+        }
+        if !out.iter().any(|x| x == d) {
+            out.push(d.to_string());
+        }
+    }
+    out
 }
 
 /// Files under a `.gdignore`d directory: present on disk, never parsed.
@@ -367,6 +418,10 @@ impl Project {
             if name == "project.godot" && res == "res://project.godot" {
                 pr.read_project_godot(&res, &src);
             }
+        }
+
+        if let Ok(src) = fs::read_to_string(root.join(".gitignore")) {
+            pr.gitignored_dirs = gitignored_dirs(&src);
         }
 
         for d in &pr.uid_decls {
@@ -785,6 +840,12 @@ fn prefix(section: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gitignored_dirs_keeps_only_plain_directory_names() {
+        let src = "# comment\n/game\n/game/**\npopochiu/\n/addons/*\n!/addons/keep/\n.godot/\n*.import\ndata_*/\nexport.cfg\nbuild/web\nDS_Store\n__pycache__/\n/builds/\n";
+        assert_eq!(gitignored_dirs(src), vec!["game", "popochiu", "addons"]);
+    }
 
     #[test]
     fn sub_resource_suffix_is_stripped() {

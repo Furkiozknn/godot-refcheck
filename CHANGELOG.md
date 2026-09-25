@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A `.gdignore`d directory is no longer read.** Godot does not scan a
+  directory that holds a `.gdignore` file: nothing in it is imported, given a
+  uid or registered as a class. `godot-refcheck` read it anyway, and on
+  KoBeWi/Metroidvania-System, which keeps a copy of its sample project under
+  `Extensions/` for users to paste over the original, that produced fifteen
+  duplicate-uid and duplicate-class-name errors out of seventeen. Files there
+  still count as present, so a load by path into such a directory (material-
+  maker's demo scenes load `examples/*.ptex` that way) is not reported as
+  missing. The corpus result is unchanged at 50; the file counts in
+  `docs/corpus.md` are lower because those directories are no longer read.
+- **A uid-only project setting next to a git-ignored directory is a warning,
+  not an error.** carenalgas/popochiu's editor plugin writes its autoload
+  scripts into `game/`, which the repository's `.gitignore` excludes, so a
+  fresh clone has six `autoload` entries written as `"*uid://…"` that resolve
+  to nothing. Each one was an error. A uid carries no path, so there is no
+  telling from the clone whether the file is broken or just not generated yet.
+  The finding is now a warning that names the ignored directories. Without a
+  `.gitignore` excluding project content, it is still an error. The corpus
+  result is unchanged at 50.
+
 ## 0.3.0
 
 ### Fixed
@@ -12,6 +36,22 @@
   `@v0.2.0` goes red on exactly the repositories that are fine. The counts now
   come from `--json`, and `tools/action_smoke.py` runs the action's own `run:`
   block against the clean and broken fixtures at every `--fail-on` level.
+- **The Action never used the binary it downloaded.** On Linux and macOS it
+  looked for `godot-refcheck` at the top of the unpacked archive, but release
+  archives keep it in a `godot-refcheck-<tag>-<target>/` directory, so every
+  run fell back to building from source with `cargo`. It now finds the binary,
+  **verifies it against the release's published `.sha256`** (a mismatch or a
+  missing checksum stops the step), and passes inputs through `env:` rather
+  than pasting them into the script, so a path with a space works.
+- **`fix: true` reported `repaired=0`.** Both passes ran `--fix`, so the second
+  found nothing left to repair; only the JSON pass repairs now, and only
+  applied repairs are counted.
+- **A relative path could scan nothing and exit 0.** From inside a project,
+  `godot-refcheck art` or a typo resolved to an empty root and printed "no
+  problems found". Relative paths now resolve against the working directory,
+  and a path that does not exist exits 2.
+- `tools/action_smoke.py` (now 12 cases, including installing a real release
+  archive offline) runs in CI; before, no workflow ran it.
 
 ### Added
 

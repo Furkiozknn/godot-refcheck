@@ -40,6 +40,14 @@ Quiet when: the uid is unknown but the same reference also carries a path that
 exists. The engine falls back to the path and loads the resource, so nothing is
 broken.
 
+A warning instead of an error when: the reference is a project setting and the
+project's own `.gitignore` excludes a directory inside it. A plugin may generate
+the file there on setup, and a fresh clone cannot tell that apart from a broken
+reference. popochiu writes its autoloads into a git-ignored `game/`, and every
+one of them was reported as an error. The warning names the ignored
+directories. OS litter, caches and export output (`DS_Store`, `__pycache__`,
+`build`, `export`, …) do not count, because nothing is generated there.
+
 ## `duplicate-uid` (error)
 
 Two files declare the same `uid://`. This is what copying a `.tscn`, a `.tres`
@@ -139,5 +147,5 @@ A repair is a single-line, in-place edit of the exact text that was written. The
 rest of the file — ordering, spacing, line endings — is untouched, and nothing
 is ever deleted: a leftover `.import` file is reported, never removed.
 
-Against the eleven corpus repositories, 19,305 files in projects that work,
+Against the eleven corpus repositories, 17,198 files in projects that work,
 `--fix-dry-run` proposes no change at all.

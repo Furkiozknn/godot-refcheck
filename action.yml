@@ -81,6 +81,12 @@ runs:
       run: |
         set -eu
         version="${RC_VERSION#v}"
+        # The version becomes part of a URL and of a file name below.
+        case "$version" in
+          *[!0-9A-Za-z.+-]*)
+            echo "::error::version must look like 0.3.0 or v0.3.0, got: $RC_VERSION"
+            exit 1 ;;
+        esac
         if [ -z "$version" ]; then
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$GITHUB_ACTION_PATH/Cargo.toml" | head -n 1)"
         fi
@@ -203,11 +209,14 @@ runs:
         f = d.get("findings") or []
         n = lambda lvl: sum(1 for x in f if x.get("level") == lvl)
         done = [r for r in (d.get("repairs") or []) if r.get("applied")]
+        # A removed byte-order mark would print as an invisible character
+        # followed by nothing.
+        show = lambda t: "(removed)" if t == "" else ("U+FEFF" if t == "\ufeff" else t)
         print(n("error"), n("warning"), n("info"), len(done))
         for r in d.get("repairs") or []:
             where = "%s:%s" % (r.get("file", "").replace("res://", "", 1), r.get("line"))
             tail = "" if r.get("applied") else "  (not applied: %s)" % r.get("note", "")
-            print("  %s  %s -> %s%s" % (where, r.get("old"), r.get("new"), tail))
+            print("  %s  %s -> %s%s" % (where, show(r.get("old")), show(r.get("new")), tail))
         PY
         )"
         counts="$(printf '%s\n' "$summary" | head -n 1)"

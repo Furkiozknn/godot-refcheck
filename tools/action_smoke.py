@@ -172,7 +172,7 @@ def install_cases(binary: str) -> list[tuple[str, str]]:
     runner_arch, target = arch
     version = "9.9.9"
 
-    def once(tamper: bool, publish: bool) -> tuple[int, dict[str, str], str, Path]:
+    def once(tamper: bool, publish: bool, asked: str = version) -> tuple[int, dict[str, str], str, Path]:
         tmp = Path(tempfile.mkdtemp())
         rel = tmp / "release"
         tools = tmp / "bin"
@@ -196,7 +196,7 @@ def install_cases(binary: str) -> list[tuple[str, str]]:
             "RUNNER_TEMP": str(runner),
             "GITHUB_ACTION_PATH": str(KOK),
         }
-        kod, cikti, gurultu = execute(0, {"version": version}, binary, env, tmp)
+        kod, cikti, gurultu = execute(0, {"version": asked}, binary, env, tmp)
         return kod, cikti, gurultu, tmp
 
     kod, cikti, gurultu, tmp = once(tamper=False, publish=True)
@@ -220,6 +220,15 @@ def install_cases(binary: str) -> list[tuple[str, str]]:
         sonuclar.append(("kurulum: yayim yoksa kaynaktan derlenir", "kod %d: %s" % (kod, gurultu.strip()[-400:])))
     else:
         sonuclar.append(("kurulum: yayim yoksa kaynaktan derlenir", ""))
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # `version` ends up in a URL and in a file name under RUNNER_TEMP; a value
+    # with a slash in it is refused before anything is downloaded or built.
+    kod, cikti, gurultu, tmp = once(tamper=False, publish=True, asked="../../9.9.9")
+    if kod == 0 or "version must look like" not in gurultu or "trying" in gurultu:
+        sonuclar.append(("kurulum: gecersiz version reddedilir", "kod %d: %s" % (kod, gurultu.strip()[-400:])))
+    else:
+        sonuclar.append(("kurulum: gecersiz version reddedilir", ""))
     shutil.rmtree(tmp, ignore_errors=True)
     return sonuclar
 
@@ -276,6 +285,23 @@ def main() -> int:
             print("     " + gurultu.strip().replace("\n", "\n     ")[:600])
         else:
             print("ok   %-32s cikis %d, %s" % ("fix, tasinmis proje", kod, cikti))
+    finally:
+        shutil.rmtree(kopya.parent, ignore_errors=True)
+
+    # A byte-order mark repair: removing three invisible bytes has to read as
+    # something in the log, not as "  settings.tres:1   -> ".
+    ekstra += 1
+    kopya = Path(tempfile.mkdtemp()) / "bom"
+    shutil.copytree(KOK / "tests" / "projects" / "bom", kopya)
+    try:
+        kod, cikti, gurultu = run_case(binary, path=str(kopya), fix="true", **{"fail-on": "error"})
+        if kod != 0 or cikti.get("repaired") != "1" or cikti.get("errors") != "0" \
+                or "settings.tres:1  U+FEFF -> (removed)" not in gurultu:
+            kalan += 1
+            print("HATA fix: BOM onarimi bekleniyordu: kod %d, %s" % (kod, cikti))
+            print("     " + gurultu.strip().replace("\n", "\n     ")[:600])
+        else:
+            print("ok   %-32s cikis %d, %s" % ("fix, BOM", kod, cikti))
     finally:
         shutil.rmtree(kopya.parent, ignore_errors=True)
 

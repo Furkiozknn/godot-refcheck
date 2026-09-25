@@ -253,7 +253,7 @@ fn recursive_mode_visits_every_fixture_project() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/projects");
     let o = run(&[root.to_str().unwrap(), "--recursive", "--fail-on", "never", "--quiet"]);
     assert_eq!(o.code, 0, "{}", o.stderr);
-    assert!(o.stdout.contains("8 projects"), "{}", o.stdout);
+    assert!(o.stdout.contains("9 projects"), "{}", o.stdout);
 }
 
 #[test]

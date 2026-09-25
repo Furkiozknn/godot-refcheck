@@ -486,3 +486,17 @@ fn a_uid_only_setting_is_still_an_error_without_a_gitignore() {
     assert!(!f.is_empty());
     assert!(f.iter().all(|x| x.level == Level::Error));
 }
+
+/// `directory_rules` keys are folders. The clean fixture sets one for
+/// `res://addons`, which exists, so the project stays clean. `is_dir` only
+/// answers yes for a folder that really holds files, so a misspelt folder
+/// is still reported as missing.
+#[test]
+fn a_setting_that_names_an_existing_directory_is_not_missing() {
+    assert!(of(&scan("clean"), "missing-resource").is_empty());
+    let p = Project::load(&project_dir("clean"));
+    assert!(p.is_dir("res://addons"));
+    assert!(p.is_dir("res://addons/"));
+    assert!(!p.is_dir("res://addon"));
+    assert!(!p.is_dir("res://icon.svg"));
+}

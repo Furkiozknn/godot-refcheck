@@ -23,6 +23,13 @@
   The finding is now a warning that names the ignored directories. Without a
   `.gitignore` excluding project content, it is still an error. The corpus
   result is unchanged at 50.
+- **A project setting that names an existing directory is not missing.**
+  `debug/gdscript/warnings/directory_rules` maps folders such as
+  `"res://addons"` to a warning level, and godot-refcheck read each key as a
+  file: nathanhoad/godot_dialogue_manager and HungryProton/scatter each got a
+  `missing-resource` error for their own `addons/` folder. A folder that holds
+  files now satisfies a project-setting reference; a misspelt one is still
+  reported. The corpus result is unchanged at 50.
 
 ## 0.3.0
 

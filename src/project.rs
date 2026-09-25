@@ -361,6 +361,12 @@ impl Project {
         self.files.contains(res) || self.generated.contains(res) || self.ignored.contains(res)
     }
 
+    /// Whether `res` names a directory that holds at least one file.
+    pub fn is_dir(&self, res: &str) -> bool {
+        let prefix = format!("{}/", res.trim_end_matches('/'));
+        self.files.range(prefix.clone()..).next().is_some_and(|f| f.starts_with(&prefix))
+    }
+
     pub fn case_variant(&self, res: &str) -> Option<&String> {
         let l = res.to_ascii_lowercase();
         match self.lower.get(&l) {

@@ -81,6 +81,13 @@ pub fn run(p: &Project, o: &Options) -> Vec<Finding> {
                 if p.exists(path) {
                     continue;
                 }
+                // Some settings name a directory, not a file:
+                // `debug/gdscript/warnings/directory_rules` maps folders such
+                // as "res://addons" to a warning level. An existing folder
+                // there is exactly what the setting means.
+                if r.kind == RefKind::ProjectSetting && p.is_dir(path) {
+                    continue;
+                }
                 if let Some(real) = p.case_variant(path) {
                     if o.wants("case-mismatch") {
                         out.push(Finding {

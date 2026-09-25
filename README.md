@@ -22,12 +22,13 @@ that broke it.
 `godot-refcheck` reads the project files directly, resolves every reference the
 way the engine does, reports the ones that cannot be satisfied, and repairs the
 ones that have a single provable answer. It is a single binary with no runtime
-dependencies, it never launches the engine, and fifteen thousand files are
-scanned in about three seconds.
+dependencies, it never launches the engine, and the 8,324 files of 141 projects —
+the official demos, material-maker and godot-open-rpg — are scanned in about
+a second and a half on four cores.
 
 ```
 $ godot-refcheck tests/projects/broken --fail-on never
-godot-refcheck 0.1.0  tests/projects/broken
+godot-refcheck 0.3.0  tests/projects/broken
 
 main.gd:3: error: missing-resource: res://nope.tscn is not in the project
     preload/load
@@ -208,7 +209,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: Furkiozknn/godot-refcheck@v0.1.0
+      - uses: Furkiozknn/godot-refcheck@v0.3.0
         with:
           path: .
 ```
@@ -221,7 +222,7 @@ With `sarif: refcheck.sarif` the findings can be uploaded to GitHub code
 scanning and appear inline on the changed lines of a pull request:
 
 ```yaml
-      - uses: Furkiozknn/godot-refcheck@v0.1.0
+      - uses: Furkiozknn/godot-refcheck@v0.3.0
         with:
           sarif: refcheck.sarif
           fail-on: never
@@ -325,7 +326,7 @@ tests, because each of them once produced a false finding here.
 ## Development
 
 ```sh
-cargo test                                   # 128 tests, no network
+cargo test                                   # no network
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 python3 tools/verify_with_godot.py --download

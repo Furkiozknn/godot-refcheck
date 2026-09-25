@@ -75,12 +75,14 @@ jobs:
           # 17 -> 19 when tests/projects/nodepath was added: that fixture
           # carries exactly two missing-node-path findings, and this step is
           # here so a change in what the fixtures report cannot pass silently.
+          # Warnings 2 -> 4 with tests/projects/generated: its two uid-only
+          # settings beside a git-ignored game/ are warnings by design.
           if [ "${{ steps.refcheck.outputs.errors }}" != "19" ]; then
             echo "expected 19 errors from the fixture projects"
             exit 1
           fi
-          if [ "${{ steps.refcheck.outputs.warnings }}" != "2" ]; then
-            echo "expected 2 warnings from the fixture projects"
+          if [ "${{ steps.refcheck.outputs.warnings }}" != "4" ]; then
+            echo "expected 4 warnings from the fixture projects"
             exit 1
           fi
 

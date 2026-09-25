@@ -27,11 +27,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
+          # The notes are this version's CHANGELOG section, not the whole
+          # file: "## 0.3.1" up to the next "## ".
+          awk -v v="## ${TAG#v}" '$0 == v {on=1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "CHANGELOG.md has no '## ${TAG#v}' section" >&2
+            exit 1
+          fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "release $TAG already exists"
           else
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
-              --draft --title "$TAG" --notes-file CHANGELOG.md
+              --draft --title "$TAG" --notes-file notes.md
           fi
 
   build:
@@ -156,13 +163,19 @@ jobs:
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
 
+      # The token reaches the commands through the environment, never
+      # pasted into the script text.
       - name: Publish
-        run: cargo publish --locked --token '${{ steps.auth.outputs.token }}'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --locked
 
       - name: Give the token back
         if: always() && steps.auth.outputs.token != ''
+        env:
+          CRATES_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           curl -sS -X DELETE https://crates.io/api/v1/trusted_publishing/tokens \
-            -H 'Authorization: Bearer ${{ steps.auth.outputs.token }}' \
+            -H "Authorization: Bearer $CRATES_TOKEN" \
             -H 'User-Agent: godot-refcheck-release' >/dev/null
           echo "revoked"

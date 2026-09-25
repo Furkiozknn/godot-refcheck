@@ -17,6 +17,7 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10  # olculen en uzun kosu 57 sn
     strategy:
       fail-fast: false
       matrix:
@@ -52,6 +53,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # olculen en uzun kosu 11 sn
     steps:
       - uses: actions/checkout@v7
       - run: cargo fmt --check
@@ -60,6 +62,7 @@ jobs:
   action:
     name: the action checks this repository
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # olculen en uzun kosu 24 sn
     steps:
       - uses: actions/checkout@v7
       - id: refcheck
@@ -75,18 +78,23 @@ jobs:
           # 17 -> 19 when tests/projects/nodepath was added: that fixture
           # carries exactly two missing-node-path findings, and this step is
           # here so a change in what the fixtures report cannot pass silently.
-          if [ "${{ steps.refcheck.outputs.errors }}" != "19" ]; then
-            echo "expected 19 errors from the fixture projects"
+          # Warnings 2 -> 4 with tests/projects/generated: its two uid-only
+          # settings beside a git-ignored game/ are warnings by design.
+          # Errors 19 -> 20 with tests/projects/bom: one .tres saved with a
+          # byte-order mark the engine cannot parse.
+          if [ "${{ steps.refcheck.outputs.errors }}" != "20" ]; then
+            echo "expected 20 errors from the fixture projects"
             exit 1
           fi
-          if [ "${{ steps.refcheck.outputs.warnings }}" != "2" ]; then
-            echo "expected 2 warnings from the fixture projects"
+          if [ "${{ steps.refcheck.outputs.warnings }}" != "4" ]; then
+            echo "expected 4 warnings from the fixture projects"
             exit 1
           fi
 
   oracle:
     name: agree with the engine
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # olculen en uzun kosu 140 sn
     steps:
       - uses: actions/checkout@v7
       - run: cargo build --release
@@ -96,6 +104,7 @@ jobs:
   sarif:
     name: code scanning
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # olculen en uzun kosu 31 sn
     if: github.event_name == 'push'
     permissions:
       contents: read
@@ -112,3 +121,17 @@ jobs:
         with:
           sarif_file: refcheck.sarif
           category: godot-refcheck
+
+  # tools/action_smoke.py runs action.yml's own shell against the fixtures,
+  # including the install step with a stand-in for the release download. It
+  # existed but ran nowhere, so the Action's download path had silently fallen
+  # back to a source build on every Linux and macOS runner.
+  action-smoke:
+    name: the action's shell, step by step
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # olculen en uzun kosu 37 sn
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo build --release
+      - run: python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --quiet --break-system-packages pyyaml
+      - run: python3 tools/action_smoke.py target/release/godot-refcheck

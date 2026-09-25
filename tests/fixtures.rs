@@ -159,7 +159,9 @@ fn a_godot_3_project_is_understood() {
 
 /// Everything in this project looks broken to a naive reader and is not:
 /// a dead Godot 3 `[locale]` block, locale-suffixed remaps, run-time paths,
-/// an editor-written `[replication]` block and a sub-resource path.
+/// an editor-written `[replication]` block, a sub-resource path, and a copy
+/// of the main scene - same uid, a reference to a missing file - kept in a
+/// directory Godot is told to skip with `.gdignore`.
 #[test]
 fn shapes_that_only_look_broken_produce_no_error() {
     let f = scan("tricky");
@@ -172,6 +174,16 @@ fn the_unused_scan_finds_the_one_asset_nothing_points_at() {
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].file, "res://dead/unused.tres");
     assert_eq!(f[0].level, Level::Info);
+}
+
+#[test]
+fn a_gdignored_directory_is_not_read() {
+    let p = Project::load(&project_dir("tricky"));
+    assert!(
+        p.files.iter().all(|f| !f.starts_with("res://extras/")),
+        "a file under a .gdignore'd directory was read"
+    );
+    assert!(p.refs.iter().all(|r| !r.from.starts_with("res://extras/")));
 }
 
 #[test]
@@ -450,4 +462,158 @@ fn the_check_can_be_skipped_like_any_other() {
     skip.insert("missing-node-path".to_string());
     let f = scan_with("nodepath", Options { skip, ..Options::default() });
     assert!(of(&f, "missing-node-path").is_empty());
+}
+
+/// popochiu generates its autoload scripts into a git-ignored `game/`, so a
+/// fresh clone has uid-only autoloads that resolve to nothing. Anywhere else
+/// the same reference is an error; next to a git-ignored directory it is a
+/// warning that says why. The rule is about uid-only project settings, not
+/// autoloads in particular, so the uid-only icon in the fixture gets the same
+/// treatment.
+#[test]
+fn a_uid_only_setting_next_to_a_gitignored_directory_is_a_warning() {
+    let f = of(&scan("generated"), "unknown-uid");
+    assert_eq!(f.len(), 2, "{:#?}", f);
+    for x in &f {
+        assert_eq!(x.level, Level::Warning);
+        assert!(x.evidence.contains("game/"), "{}", x.evidence);
+    }
+}
+
+#[test]
+fn a_uid_only_setting_is_still_an_error_without_a_gitignore() {
+    let f = of(&scan("broken"), "unknown-uid");
+    assert!(!f.is_empty());
+    assert!(f.iter().all(|x| x.level == Level::Error));
+}
+
+/// `directory_rules` keys are folders. The clean fixture sets one for
+/// `res://addons`, which exists, so the project stays clean. `is_dir` only
+/// answers yes for a folder that really holds files, so a misspelt folder
+/// is still reported as missing.
+#[test]
+fn a_setting_that_names_an_existing_directory_is_not_missing() {
+    assert!(of(&scan("clean"), "missing-resource").is_empty());
+    let p = Project::load(&project_dir("clean"));
+    assert!(p.is_dir("res://addons"));
+    assert!(p.is_dir("res://addons/"));
+    assert!(!p.is_dir("res://addon"));
+    assert!(!p.is_dir("res://icon.svg"));
+}
+
+/// A small project written from code, not committed as a fixture, so no editor
+/// or formatter can quietly drop a byte-order mark from it.
+fn scratch_project(tag: &str, files: &[(&str, String)]) -> (Project, Vec<Finding>) {
+    let d = std::env::temp_dir().join(format!("refcheck-{}-{}", tag, std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    for (name, body) in files {
+        let path = d.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+    let p = Project::load(&d);
+    let f = checks::run(&p, &Options::default());
+    let _ = std::fs::remove_dir_all(&d);
+    (p, f)
+}
+
+const BOM: &str = "\u{feff}";
+
+/// Windows editors that save "UTF-8 with signature" (Visual Studio, Notepad
+/// before 2019, PowerShell 5's `Out-File -Encoding utf8`) put a byte-order
+/// mark in front of the first line. Godot 3.6 and 4.4.1 read scripts, shaders
+/// and `.uid` files past it without a word, and so must this: a `.uid` file
+/// with a mark had its uid dropped, and every use of that uid became an
+/// `unknown-uid` error somewhere else.
+#[test]
+fn a_byte_order_mark_the_engine_skips_is_skipped() {
+    let (p, f) = scratch_project(
+        "bom-skipped",
+        &[
+            (
+                "project.godot",
+                format!("{BOM}; Engine configuration file.\nconfig_version=5\n\n[autoload]\nG=\"*uid://dgsidecar00001\"\n"),
+            ),
+            ("g.gd", format!("{BOM}class_name Bommed\nextends Node\n")),
+            ("g.gd.uid", format!("{BOM}uid://dgsidecar00001\n")),
+            ("twin.gd", "class_name Bommed\nextends Node\n".to_string()),
+        ],
+    );
+    assert_eq!(p.uid_owner.get("uid://dgsidecar00001").map(String::as_str), Some("res://g.gd"));
+    // The class_name behind the mark is read: the twin is caught.
+    assert_eq!(files(&f, "duplicate-class-name").len(), 2, "{:#?}", f);
+    assert!(of(&f, "unknown-uid").is_empty(), "{:#?}", f);
+    assert!(of(&f, "byte-order-mark").is_empty(), "{:#?}", f);
+}
+
+/// In front of a `[section]` the mark breaks Godot's config parser (measured
+/// with 3.6 and 4.4.1): a scene or resource fails with `Parse Error: Expected
+/// '['` and its uid is never registered. That used to show up as an
+/// `unknown-uid` error in the file that used the uid, and as nothing at all
+/// when the scene was loaded by path. The error now names the file that has to
+/// change, once, and the uid behind the mark still resolves so the same
+/// problem is not reported a second time elsewhere.
+#[test]
+fn a_byte_order_mark_before_a_section_is_reported_on_that_file() {
+    let (p, f) = scratch_project(
+        "bom-section",
+        &[
+            (
+                "project.godot",
+                "config_version=5\n\n[application]\nrun/main_scene=\"uid://bq2kx8y7n3a1c\"\n".to_string(),
+            ),
+            (
+                "a.tscn",
+                format!("{BOM}[gd_scene format=3 uid=\"uid://bq2kx8y7n3a1c\"]\n\n[node name=\"A\" type=\"Node2D\"]\n"),
+            ),
+            (
+                "r.tres",
+                format!("{BOM}[gd_resource type=\"Resource\" format=3 uid=\"uid://cbomtres00001\"]\n\n[resource]\n"),
+            ),
+            ("h.gd", "extends Node\nvar r = load(\"res://r.tres\")\n".to_string()),
+            ("addons/p/plugin.cfg", format!("{BOM}[plugin]\nname=\"p\"\nscript=\"p.gd\"\n")),
+            ("addons/p/p.gd", "@tool\nextends EditorPlugin\n".to_string()),
+        ],
+    );
+    assert_eq!(p.uid_owner.get("uid://bq2kx8y7n3a1c").map(String::as_str), Some("res://a.tscn"));
+    let bom = of(&f, "byte-order-mark");
+    let got: Vec<(&str, usize, Level)> =
+        bom.iter().map(|x| (x.file.as_str(), x.line, x.level)).collect();
+    assert_eq!(
+        got,
+        [
+            ("res://a.tscn", 1, Level::Error),
+            ("res://addons/p/plugin.cfg", 1, Level::Error),
+            ("res://r.tres", 1, Level::Error)
+        ],
+        "{:#?}",
+        f
+    );
+    assert_eq!(f.len(), 3, "only the three marks: {:#?}", f);
+}
+
+/// #8 keeps a `.gdignore`d folder's files as present-but-unread, and #11 lets
+/// a project setting name a folder. Together, a `directory_rules` entry for a
+/// `.gdignore`d folder (vendored code kept out of the import) was still a
+/// `missing-resource` error: the folder test only looked at files that are
+/// read.
+#[test]
+fn a_setting_that_names_a_gdignored_directory_is_not_missing() {
+    let p = Project::load(&project_dir("tricky"));
+    assert!(p.is_dir("res://extras"));
+
+    let d = std::env::temp_dir().join(format!("refcheck-gdignore-dir-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(d.join("vendor")).unwrap();
+    std::fs::write(d.join("vendor/.gdignore"), "").unwrap();
+    std::fs::write(d.join("vendor/x.gd"), "extends Node\n").unwrap();
+    std::fs::write(
+        d.join("project.godot"),
+        "config_version=5\n\n[debug]\ngdscript/warnings/directory_rules={\n\"res://vendor\": 0\n}\n",
+    )
+    .unwrap();
+    let p = Project::load(&d);
+    let f = checks::run(&p, &Options::default());
+    let _ = std::fs::remove_dir_all(&d);
+    assert!(f.is_empty(), "unexpected findings: {:#?}", f);
 }

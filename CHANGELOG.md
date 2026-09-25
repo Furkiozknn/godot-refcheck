@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A `.gdignore`d directory is no longer read.** Godot does not scan a
+  directory that holds a `.gdignore` file: nothing in it is imported, given a
+  uid or registered as a class. `godot-refcheck` read it anyway, and on
+  KoBeWi/Metroidvania-System, which keeps a copy of its sample project under
+  `Extensions/` for users to paste over the original, that produced fifteen
+  duplicate-uid and duplicate-class-name errors out of seventeen. Files there
+  still count as present, so a load by path into such a directory (material-
+  maker's demo scenes load `examples/*.ptex` that way) is not reported as
+  missing. The corpus result is unchanged at 50; the file counts in
+  `docs/corpus.md` are lower because those directories are no longer read.
+- **A uid-only project setting next to a git-ignored directory is a warning,
+  not an error.** carenalgas/popochiu's editor plugin writes its autoload
+  scripts into `game/`, which the repository's `.gitignore` excludes, so a
+  fresh clone has six `autoload` entries written as `"*uid://…"` that resolve
+  to nothing. Each one was an error. A uid carries no path, so there is no
+  telling from the clone whether the file is broken or just not generated yet.
+  The finding is now a warning that names the ignored directories. Without a
+  `.gitignore` excluding project content, it is still an error. The corpus
+  result is unchanged at 50.
+- **A project setting that names an existing directory is not missing.**
+  `debug/gdscript/warnings/directory_rules` maps folders such as
+  `"res://addons"` to a warning level, and godot-refcheck read each key as a
+  file: nathanhoad/godot_dialogue_manager and HungryProton/scatter each got a
+  `missing-resource` error for their own `addons/` folder. A folder that holds
+  files now satisfies a project-setting reference; a misspelt one is still
+  reported. The corpus result is unchanged at 50.
+- **A byte-order mark no longer hides a uid, and is reported where it is.**
+  A file saved as "UTF-8 with signature" starts with three bytes that stood in
+  front of `[gd_scene … uid=…]` or `uid://…`, so the uid was never read: a
+  project using it got an `unknown-uid` error in a different file, and a scene
+  loaded by path got nothing at all. The mark is now skipped when reading. A
+  headless Godot 3.6 and 4.4.1 skip it too in scripts, shaders and `.uid`
+  files, but not in `.tscn`, `.tres`, `.import`, `project.godot` or
+  `plugin.cfg`, where it breaks the first `[section]` (`Parse Error: Expected
+  '['`, a re-import under a new uid, a lost section, a plugin that does not
+  load). That is a new error, `byte-order-mark`, on the file itself, and
+  `--fix` removes the three bytes. `tools/verify_with_godot.py` checks it
+  against the engine with the new `tests/projects/bom` fixture, so the fixture
+  error count in CI goes from 19 to 20. The corpus result is unchanged at 50:
+  none of its 17,198 files starts with a mark in front of a section.
+- **A project setting that names a `.gdignore`d directory is not missing
+  either.** With the two fixes above together, a `directory_rules` entry for a
+  folder kept out of the import by `.gdignore` was still an error, because
+  the directory test only looked at files that are read.
+
 ## 0.3.0
 
 ### Fixed
@@ -12,6 +61,22 @@
   `@v0.2.0` goes red on exactly the repositories that are fine. The counts now
   come from `--json`, and `tools/action_smoke.py` runs the action's own `run:`
   block against the clean and broken fixtures at every `--fail-on` level.
+- **The Action never used the binary it downloaded.** On Linux and macOS it
+  looked for `godot-refcheck` at the top of the unpacked archive, but release
+  archives keep it in a `godot-refcheck-<tag>-<target>/` directory, so every
+  run fell back to building from source with `cargo`. It now finds the binary,
+  **verifies it against the release's published `.sha256`** (a mismatch or a
+  missing checksum stops the step), and passes inputs through `env:` rather
+  than pasting them into the script, so a path with a space works.
+- **`fix: true` reported `repaired=0`.** Both passes ran `--fix`, so the second
+  found nothing left to repair; only the JSON pass repairs now, and only
+  applied repairs are counted.
+- **A relative path could scan nothing and exit 0.** From inside a project,
+  `godot-refcheck art` or a typo resolved to an empty root and printed "no
+  problems found". Relative paths now resolve against the working directory,
+  and a path that does not exist exits 2.
+- `tools/action_smoke.py` (now 12 cases, including installing a real release
+  archive offline) runs in CI; before, no workflow ran it.
 
 ### Added
 

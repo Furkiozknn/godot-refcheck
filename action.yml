@@ -71,11 +71,22 @@ outputs:
 runs:
   using: composite
   steps:
+    # Inputs reach the shell through the environment, never pasted into the
+    # script: a path with a space, or an `only` list written "a, b", is one
+    # argument and stays one, and no input can end a quote and run a command.
     - id: install
       shell: bash
+      env:
+        RC_VERSION: ${{ inputs.version }}
       run: |
         set -eu
-        version="${{ inputs.version }}"
+        version="${RC_VERSION#v}"
+        # The version becomes part of a URL and of a file name below.
+        case "$version" in
+          *[!0-9A-Za-z.+-]*)
+            echo "::error::version must look like 0.3.0 or v0.3.0, got: $RC_VERSION"
+            exit 1 ;;
+        esac
         if [ -z "$version" ]; then
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$GITHUB_ACTION_PATH/Cargo.toml" | head -n 1)"
         fi
@@ -89,97 +100,142 @@ runs:
         esac
         dir="${RUNNER_TEMP}/godot-refcheck"
         mkdir -p "$dir"
-        binary="$dir/godot-refcheck"
+        exe="godot-refcheck"
         if [ "${RUNNER_OS}" = "Windows" ]; then
-          binary="$dir/godot-refcheck.exe"
+          exe="godot-refcheck.exe"
         fi
+        binary="$dir/$exe"
         ok="no"
         if [ -n "$target" ]; then
           asset="godot-refcheck-v${version}-${target}.${ext}"
           url="https://github.com/Furkiozknn/godot-refcheck/releases/download/v${version}/${asset}"
           echo "trying $url"
-          if curl -fsSL -o "$dir/$asset" "$url"; then
-            if [ "$ext" = "zip" ]; then
-              unzip -o -q "$dir/$asset" -d "$dir"
-            else
-              tar -xzf "$dir/$asset" -C "$dir"
+          if curl -fsSL --retry 3 -o "$dir/$asset" "$url"; then
+            # Every release publishes a .sha256 next to each archive. A binary
+            # that does not match it is not run, and not quietly replaced by a
+            # source build either: a mismatch is something to look at.
+            if ! curl -fsSL --retry 3 -o "$dir/$asset.sha256" "$url.sha256"; then
+              echo "::error::$asset was published without $asset.sha256; refusing to run it unverified"
+              exit 1
             fi
-            if [ -f "$binary" ]; then
+            want="$(awk '{print $1; exit}' "$dir/$asset.sha256")"
+            if command -v sha256sum >/dev/null 2>&1; then
+              have="$(sha256sum "$dir/$asset" | awk '{print $1}')"
+            else
+              have="$(shasum -a 256 "$dir/$asset" | awk '{print $1}')"
+            fi
+            if [ "$want" != "$have" ]; then
+              echo "::error::checksum mismatch for $asset: expected $want, got $have"
+              exit 1
+            fi
+            echo "sha256 $have verified"
+            # The .tar.gz archives keep the binary in a directory named after
+            # the archive, the .zip keeps it at the top. Unpack aside and take
+            # the one file that matters from wherever it is.
+            stage="$dir/unpack"
+            rm -rf "$stage"
+            mkdir -p "$stage"
+            if [ "$ext" = "zip" ]; then
+              unzip -o -q "$dir/$asset" -d "$stage"
+            else
+              tar -xzf "$dir/$asset" -C "$stage"
+            fi
+            found="$(find "$stage" -type f -name "$exe" | head -n 1)"
+            if [ -n "$found" ]; then
+              mv -f "$found" "$binary"
               chmod +x "$binary"
               ok="yes"
             fi
+            rm -rf "$stage"
           fi
         fi
         if [ "$ok" = "no" ]; then
           echo "no published binary for ${RUNNER_OS}-${RUNNER_ARCH} at v${version}; building from source"
           cargo build --release --manifest-path "$GITHUB_ACTION_PATH/Cargo.toml"
-          built="$GITHUB_ACTION_PATH/target/release/godot-refcheck"
-          if [ "${RUNNER_OS}" = "Windows" ]; then
-            built="$GITHUB_ACTION_PATH/target/release/godot-refcheck.exe"
-          fi
-          cp "$built" "$binary"
+          cp "$GITHUB_ACTION_PATH/target/release/$exe" "$binary"
         fi
         "$binary" --version
         echo "binary=$binary" >> "$GITHUB_OUTPUT"
 
     - id: run
       shell: bash
+      env:
+        RC_BINARY: ${{ steps.install.outputs.binary }}
+        RC_PATH: ${{ inputs.path }}
+        RC_RECURSIVE: ${{ inputs.recursive }}
+        RC_UNUSED: ${{ inputs.unused }}
+        RC_ONLY: ${{ inputs.only }}
+        RC_SKIP: ${{ inputs.skip }}
+        RC_SARIF: ${{ inputs.sarif }}
+        RC_FIX: ${{ inputs.fix }}
+        RC_FIX_DRY_RUN: ${{ inputs.fix-dry-run }}
+        RC_BASELINE: ${{ inputs.baseline }}
+        RC_FAIL_ON: ${{ inputs.fail-on }}
       run: |
         set -u
-        binary='${{ steps.install.outputs.binary }}'
-        args=""
-        if [ '${{ inputs.recursive }}' = 'true' ]; then
-          args="$args --recursive"
+        # `${a[@]+"${a[@]}"}` below: an empty array is an unbound variable
+        # under `set -u` in the bash 3.2 that macOS ships.
+        args=()
+        if [ "$RC_RECURSIVE" = "true" ]; then args+=(--recursive); fi
+        if [ "$RC_UNUSED" = "true" ]; then args+=(--unused); fi
+        # "a, b" and "a,b" mean the same list.
+        if [ -n "$RC_ONLY" ]; then args+=(--only "${RC_ONLY// /}"); fi
+        if [ -n "$RC_SKIP" ]; then args+=(--skip "${RC_SKIP// /}"); fi
+        if [ -n "$RC_SARIF" ]; then args+=(--sarif "$RC_SARIF"); fi
+        if [ -n "$RC_BASELINE" ]; then args+=(--baseline "$RC_BASELINE"); fi
+        if [ "$RC_FIX" = "true" ] && [ "$RC_FIX_DRY_RUN" = "true" ]; then
+          echo "::error::fix and fix-dry-run cannot both be true"
+          exit 1
         fi
-        if [ '${{ inputs.unused }}' = 'true' ]; then
-          args="$args --unused"
-        fi
-        if [ -n '${{ inputs.only }}' ]; then
-          args="$args --only ${{ inputs.only }}"
-        fi
-        if [ -n '${{ inputs.skip }}' ]; then
-          args="$args --skip ${{ inputs.skip }}"
-        fi
-        if [ -n '${{ inputs.sarif }}' ]; then
-          args="$args --sarif ${{ inputs.sarif }}"
-        fi
-        if [ '${{ inputs.fix }}' = 'true' ]; then
-          args="$args --fix"
-        fi
-        if [ '${{ inputs.fix-dry-run }}' = 'true' ]; then
-          args="$args --fix-dry-run"
-        fi
-        if [ -n '${{ inputs.baseline }}' ]; then
-          args="$args --baseline ${{ inputs.baseline }}"
-        fi
+        repair=""
+        if [ "$RC_FIX" = "true" ]; then repair="--fix"; fi
+        if [ "$RC_FIX_DRY_RUN" = "true" ]; then repair="--fix-dry-run"; fi
 
-        # Two passes, both of which refuse to fail: the text one is what a
-        # person reads in the step summary, the JSON one is what the counts
-        # come from. The counts used to be scraped out of the text, which
-        # worked only when there was something to report - a single clean
+        # Two passes, both of which refuse to fail. The JSON one comes first
+        # and is the only one that repairs: the counts, and the list of what
+        # was repaired, are read from it. The text one is what a person reads
+        # in the step summary. The counts used to be scraped out of the text,
+        # which worked only when there was something to report - a clean
         # project prints "no problems found." and no counts line at all, so
-        # the grep matched nothing and, under `bash -e`, took the whole step
-        # down. The action failed precisely on the projects it had nothing
-        # to say about. A scan is milliseconds; a second pass is cheaper
-        # than guessing at prose.
+        # the step failed on exactly the projects it had nothing to say about.
+        # And when both passes carried --fix, the second found nothing left to
+        # repair and `repaired` was always 0.
         report="${RUNNER_TEMP}/godot-refcheck-report.txt"
         machine="${RUNNER_TEMP}/godot-refcheck-report.json"
-        # shellcheck disable=SC2086
-        "$binary" '${{ inputs.path }}' $args --fail-on never | tee "$report"
-        # shellcheck disable=SC2086
-        "$binary" '${{ inputs.path }}' $args --json --fail-on never > "$machine"
-        counts="$(python3 - "$machine" <<'PY'
+        "$RC_BINARY" "$RC_PATH" ${args[@]+"${args[@]}"} ${repair:+"$repair"} --json --fail-on never > "$machine"
+        summary="$(python3 - "$machine" <<'PY'
         import json, sys
         d = json.load(open(sys.argv[1], encoding="utf-8"))
         f = d.get("findings") or []
         n = lambda lvl: sum(1 for x in f if x.get("level") == lvl)
-        print(n("error"), n("warning"), n("info"), len(d.get("repairs") or []))
+        done = [r for r in (d.get("repairs") or []) if r.get("applied")]
+        # A removed byte-order mark would print as an invisible character
+        # followed by nothing.
+        show = lambda t: "(removed)" if t == "" else ("U+FEFF" if t == "\ufeff" else t)
+        print(n("error"), n("warning"), n("info"), len(done))
+        for r in d.get("repairs") or []:
+            where = "%s:%s" % (r.get("file", "").replace("res://", "", 1), r.get("line"))
+            tail = "" if r.get("applied") else "  (not applied: %s)" % r.get("note", "")
+            print("  %s  %s -> %s%s" % (where, show(r.get("old")), show(r.get("new")), tail))
         PY
         )"
+        counts="$(printf '%s\n' "$summary" | head -n 1)"
         read -r errors warnings notes repaired <<< "$counts"
         errors="${errors:-0}"; warnings="${warnings:-0}"; notes="${notes:-0}"
         repaired="${repaired:-0}"
         total=$((errors + warnings + notes))
+        {
+          if [ -n "$repair" ] && [ "$(printf '%s\n' "$summary" | wc -l)" -gt 1 ]; then
+            if [ "$repair" = "--fix" ]; then
+              echo "repaired $repaired reference(s)"
+            else
+              echo "would repair $repaired reference(s)"
+            fi
+            printf '%s\n' "$summary" | tail -n +2
+            echo ""
+          fi
+          "$RC_BINARY" "$RC_PATH" ${args[@]+"${args[@]}"} --fail-on never
+        } | tee "$report"
         {
           echo "errors=$errors"
           echo "warnings=$warnings"
@@ -197,7 +253,7 @@ runs:
           echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
 
-        case '${{ inputs.fail-on }}' in
+        case "$RC_FAIL_ON" in
           never) exit 0 ;;
           info)  if [ "$total" -gt 0 ]; then exit 1; fi ;;
           warning) if [ $((errors + warnings)) -gt 0 ]; then exit 1; fi ;;

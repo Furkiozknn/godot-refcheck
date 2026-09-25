@@ -591,3 +591,29 @@ fn a_byte_order_mark_before_a_section_is_reported_on_that_file() {
     );
     assert_eq!(f.len(), 3, "only the three marks: {:#?}", f);
 }
+
+/// #8 keeps a `.gdignore`d folder's files as present-but-unread, and #11 lets
+/// a project setting name a folder. Together, a `directory_rules` entry for a
+/// `.gdignore`d folder (vendored code kept out of the import) was still a
+/// `missing-resource` error: the folder test only looked at files that are
+/// read.
+#[test]
+fn a_setting_that_names_a_gdignored_directory_is_not_missing() {
+    let p = Project::load(&project_dir("tricky"));
+    assert!(p.is_dir("res://extras"));
+
+    let d = std::env::temp_dir().join(format!("refcheck-gdignore-dir-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(d.join("vendor")).unwrap();
+    std::fs::write(d.join("vendor/.gdignore"), "").unwrap();
+    std::fs::write(d.join("vendor/x.gd"), "extends Node\n").unwrap();
+    std::fs::write(
+        d.join("project.godot"),
+        "config_version=5\n\n[debug]\ngdscript/warnings/directory_rules={\n\"res://vendor\": 0\n}\n",
+    )
+    .unwrap();
+    let p = Project::load(&d);
+    let f = checks::run(&p, &Options::default());
+    let _ = std::fs::remove_dir_all(&d);
+    assert!(f.is_empty(), "unexpected findings: {:#?}", f);
+}

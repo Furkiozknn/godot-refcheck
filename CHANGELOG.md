@@ -44,6 +44,10 @@
   against the engine with the new `tests/projects/bom` fixture, so the fixture
   error count in CI goes from 19 to 20. The corpus result is unchanged at 50:
   none of its 17,198 files starts with a mark in front of a section.
+- **A project setting that names a `.gdignore`d directory is not missing
+  either.** With the two fixes above together, a `directory_rules` entry for a
+  folder kept out of the import by `.gdignore` was still an error, because
+  the directory test only looked at files that are read.
 
 ## 0.3.0
 

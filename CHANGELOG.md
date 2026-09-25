@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+### Fixed
+
+- **The GitHub Action failed on clean projects.** The finding counts were
+  scraped from the human-readable summary, and a single project with nothing
+  wrong prints "no problems found" instead of a count; under the runner's
+  `bash -e -o pipefail` the empty match ended the step with exit 1. Every
+  released tag before this one carries the bug, so a pin to `@v0.1.0` or
+  `@v0.2.0` goes red on exactly the repositories that are fine. The counts now
+  come from `--json`, and `tools/action_smoke.py` runs the action's own `run:`
+  block against the clean and broken fixtures at every `--fail-on` level.
+
+### Added
 
 - `missing-node-path`: a script reaching for `$Head/Body` — or
   `get_node("Head/Body")` — that the scene it runs in does not contain. The

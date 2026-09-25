@@ -4,7 +4,7 @@ Rules are only worth having if they stay quiet on projects that work. These
 eleven repositories are real, maintained Godot projects; `tools/corpus.py`
 clones them and runs `godot-refcheck` over every `project.godot` inside.
 
-Measured on 2026-09-22 with godot-refcheck 0.2.0, shallow clones of the default
+Measured on 2026-09-22 with the code released as godot-refcheck 0.3.0, shallow clones of the default
 branch unless a branch is named.
 
 | repository | projects | files | references | findings |

@@ -139,5 +139,5 @@ A repair is a single-line, in-place edit of the exact text that was written. The
 rest of the file — ordering, spacing, line endings — is untouched, and nothing
 is ever deleted: a leftover `.import` file is reported, never removed.
 
-Against the eleven corpus repositories, 19,305 files in projects that work,
+Against the eleven corpus repositories, 17,198 files in projects that work,
 `--fix-dry-run` proposes no change at all.

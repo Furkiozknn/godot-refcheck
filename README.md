@@ -22,7 +22,7 @@ that broke it.
 `godot-refcheck` reads the project files directly, resolves every reference the
 way the engine does, reports the ones that cannot be satisfied, and repairs the
 ones that have a single provable answer. It is a single binary with no runtime
-dependencies, it never launches the engine, and the 8,324 files of 141 projects —
+dependencies, it never launches the engine, and the 6,991 files it reads in 141 projects —
 the official demos, material-maker and godot-open-rpg — are scanned in about
 a second and a half on four cores.
 
@@ -283,7 +283,7 @@ godot 4.4.1-stable as the reference implementation
 ```
 
 **Working projects are the other reference.** `tools/corpus.py` scans eleven
-real repositories — 237 projects, 19,305 files, 6,904 references, 2,741 signal
+real repositories — 237 projects, 17,198 files, 6,904 references, 2,741 signal
 connections and 880 `class_name` declarations. It reports 50 findings in total,
 every one of them checked by hand and real; nothing else in those projects
 produces a finding, and `--fix-dry-run` proposes no change anywhere in them.

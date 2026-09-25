@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A `.gdignore`d directory is no longer read.** Godot does not scan a
+  directory that holds a `.gdignore` file: nothing in it is imported, given a
+  uid or registered as a class. `godot-refcheck` read it anyway, and on
+  KoBeWi/Metroidvania-System, which keeps a copy of its sample project under
+  `Extensions/` for users to paste over the original, that produced fifteen
+  duplicate-uid and duplicate-class-name errors out of seventeen. Files there
+  still count as present, so a load by path into such a directory (material-
+  maker's demo scenes load `examples/*.ptex` that way) is not reported as
+  missing. The corpus result is unchanged at 50; the file counts in
+  `docs/corpus.md` are lower because those directories are no longer read.
+
 ## 0.3.0
 
 ### Fixed

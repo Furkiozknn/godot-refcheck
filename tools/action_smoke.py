@@ -12,7 +12,10 @@ So this runs the real thing. It reads `action.yml`, substitutes the inputs
 the way GitHub does, and executes the step with the same shell the runner
 uses (`bash --noprofile --norc -e -o pipefail`), against the fixture
 projects already in this repository. Then it checks what a caller actually
-depends on: the exit code and the declared outputs.
+depends on: the exit code and the declared outputs. The install step is run
+too, offline: `curl` and `cargo` are stand-ins on PATH, and the release
+archive is packed here the way release.yml packs it, so the unpacking and
+the sha256 check are exercised without a download.
 
     python3 tools/action_smoke.py [path-to-binary]
 
@@ -39,33 +42,47 @@ except ImportError:  # pragma: no cover - the CI job installs it
     raise SystemExit(2)
 
 
+def _substitute(text: str, inputs: dict[str, str], binary: str) -> str:
+    doc = yaml.safe_load((KOK / "action.yml").read_text(encoding="utf-8"))
+    for name, spec in doc.get("inputs", {}).items():
+        value = inputs.get(name, spec.get("default", ""))
+        text = text.replace("${{ inputs.%s }}" % name, str(value))
+    text = text.replace("${{ steps.install.outputs.binary }}", binary)
+    if "${{" in text:
+        raise SystemExit("action.yml'de yerine konmamis ifade kaldi: ${{%s" % text.split("${{")[1][:60])
+    return text
+
+
+def step(index: int, inputs: dict[str, str], binary: str) -> tuple[str, dict[str, str]]:
+    """A step's run: block and env:, with inputs substituted as GitHub would."""
+    doc = yaml.safe_load((KOK / "action.yml").read_text(encoding="utf-8"))
+    s = doc["runs"]["steps"][index]
+    run = _substitute(s["run"], inputs, binary)
+    env = {k: _substitute(str(v), inputs, binary) for k, v in (s.get("env") or {}).items()}
+    return run, env
+
+
 def step_script(inputs: dict[str, str], binary: str) -> str:
     """The run: block of the second step, with inputs substituted."""
-    doc = yaml.safe_load((KOK / "action.yml").read_text(encoding="utf-8"))
-    steps = doc["runs"]["steps"]
-    run = steps[1]["run"]
-    declared = doc.get("inputs", {})
-    for name, spec in declared.items():
-        value = inputs.get(name, spec.get("default", ""))
-        run = run.replace("${{ inputs.%s }}" % name, str(value))
-    run = run.replace("${{ steps.install.outputs.binary }}", binary)
-    left = [f for f in run.split("${{")[1:]]
-    if left:
-        raise SystemExit("action.yml'de yerine konmamis ifade kaldi: ${{%s" % left[0][:60])
-    return run
+    return step(1, inputs, binary)[0]
 
 
-def run_case(binary: str, **inputs) -> tuple[int, dict[str, str], str]:
-    tmp = Path(tempfile.mkdtemp())
+def execute(index: int, inputs: dict[str, str], binary: str, extra_env: dict[str, str] | None = None,
+            tmp: Path | None = None) -> tuple[int, dict[str, str], str]:
+    own = tmp is None
+    tmp = tmp or Path(tempfile.mkdtemp())
     try:
+        run, step_env = step(index, inputs, binary)
         env = dict(os.environ)
-        env["RUNNER_TEMP"] = str(tmp)
+        env.update(step_env)
+        env.update(extra_env or {})
+        env.setdefault("RUNNER_TEMP", str(tmp))
         env["GITHUB_OUTPUT"] = str(tmp / "out.txt")
         env["GITHUB_STEP_SUMMARY"] = str(tmp / "summary.md")
-        Path(env["GITHUB_OUTPUT"]).touch()
-        Path(env["GITHUB_STEP_SUMMARY"]).touch()
+        Path(env["GITHUB_OUTPUT"]).write_text("", encoding="utf-8")
+        Path(env["GITHUB_STEP_SUMMARY"]).write_text("", encoding="utf-8")
         script = tmp / "step.sh"
-        script.write_text(step_script(inputs, binary), encoding="utf-8")
+        script.write_text(run, encoding="utf-8")
         proc = subprocess.run(
             ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", str(script)],
             cwd=str(KOK), env=env, capture_output=True, text=True, timeout=300,
@@ -76,9 +93,14 @@ def run_case(binary: str, **inputs) -> tuple[int, dict[str, str], str]:
                 k, v = line.split("=", 1)
                 out[k] = v
         summary = Path(env["GITHUB_STEP_SUMMARY"]).read_text(encoding="utf-8")
-        return proc.returncode, out, (proc.stderr or "") + "\n" + summary
+        return proc.returncode, out, (proc.stdout or "") + "\n" + (proc.stderr or "") + "\n" + summary
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        if own:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def run_case(binary: str, **inputs) -> tuple[int, dict[str, str], str]:
+    return execute(1, inputs, binary)
 
 
 CASES = [
@@ -95,6 +117,111 @@ CASES = [
     ("bozuk proje, fail-on never", dict(path="tests/projects/broken", **{"fail-on": "never"}),
      0, {}),
 ]
+
+
+# --- the install step ------------------------------------------------------
+#
+# It downloads a release archive, checks it against the published .sha256 and
+# unpacks the binary. None of that needs the network to test: `curl` and
+# `cargo` are replaced on PATH by stand-ins, and the archives are packed here
+# exactly the way release.yml packs them.
+
+FAKE_CURL = """#!/usr/bin/env bash
+out=""; url=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    --retry) shift 2 ;;
+    -*) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+src="$FAKE_RELEASE/${url##*/}"
+[ -f "$src" ] || exit 22
+cp "$src" "$out"
+"""
+
+FAKE_CARGO = """#!/usr/bin/env bash
+echo "fake cargo $*"
+"""
+
+
+def pack_release(binary: str, where: Path, version: str, target: str) -> Path:
+    """An archive laid out like release.yml's `Package` step, and its .sha256."""
+    import hashlib
+    import tarfile
+    name = "godot-refcheck-v%s-%s" % (version, target)
+    archive = where / (name + ".tar.gz")
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(binary, arcname="%s/godot-refcheck" % name)
+        tar.add(KOK / "LICENSE", arcname="%s/LICENSE" % name)
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    (where / (archive.name + ".sha256")).write_text("%s  %s\n" % (digest, archive.name), encoding="utf-8")
+    return archive
+
+
+def install_cases(binary: str) -> list[tuple[str, str]]:
+    sonuclar: list[tuple[str, str]] = []
+    if not sys.platform.startswith("linux"):
+        return [("kurulum adimi (yalnizca Linux'ta sinanir)", "")]
+    import platform
+    arch = {"x86_64": ("X64", "x86_64-unknown-linux-gnu"),
+            "aarch64": ("ARM64", "aarch64-unknown-linux-gnu")}.get(platform.machine())
+    if arch is None:
+        return [("kurulum adimi (bu mimaride sinanmaz)", "")]
+    runner_arch, target = arch
+    version = "9.9.9"
+
+    def once(tamper: bool, publish: bool) -> tuple[int, dict[str, str], str, Path]:
+        tmp = Path(tempfile.mkdtemp())
+        rel = tmp / "release"
+        tools = tmp / "bin"
+        rel.mkdir()
+        tools.mkdir()
+        for ad, govde in (("curl", FAKE_CURL), ("cargo", FAKE_CARGO)):
+            (tools / ad).write_text(govde, encoding="utf-8")
+            (tools / ad).chmod(0o755)
+        if publish:
+            archive = pack_release(binary, rel, version, target)
+            if tamper:
+                with open(archive, "ab") as fh:
+                    fh.write(b"\0")
+        runner = tmp / "runner"
+        runner.mkdir()
+        env = {
+            "PATH": "%s:%s" % (tools, os.environ.get("PATH", "")),
+            "FAKE_RELEASE": str(rel),
+            "RUNNER_OS": "Linux",
+            "RUNNER_ARCH": runner_arch,
+            "RUNNER_TEMP": str(runner),
+            "GITHUB_ACTION_PATH": str(KOK),
+        }
+        kod, cikti, gurultu = execute(0, {"version": version}, binary, env, tmp)
+        return kod, cikti, gurultu, tmp
+
+    kod, cikti, gurultu, tmp = once(tamper=False, publish=True)
+    kurulan = cikti.get("binary", "")
+    if kod != 0 or "building from source" in gurultu or not Path(kurulan).is_file():
+        sonuclar.append(("kurulum: yayimlanmis ikili kullanilir",
+                         "kod %d, binary=%r: %s" % (kod, kurulan, gurultu.strip()[-400:])))
+    else:
+        sonuclar.append(("kurulum: yayimlanmis ikili acilir, sha256 dogrulanir", ""))
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    kod, cikti, gurultu, tmp = once(tamper=True, publish=True)
+    if kod == 0 or "checksum mismatch" not in gurultu:
+        sonuclar.append(("kurulum: bozuk arsiv reddedilir", "kod %d: %s" % (kod, gurultu.strip()[-400:])))
+    else:
+        sonuclar.append(("kurulum: sha256 tutmayan arsiv reddedilir", ""))
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    kod, cikti, gurultu, tmp = once(tamper=False, publish=False)
+    if "building from source" not in gurultu or "fake cargo build --release" not in gurultu:
+        sonuclar.append(("kurulum: yayim yoksa kaynaktan derlenir", "kod %d: %s" % (kod, gurultu.strip()[-400:])))
+    else:
+        sonuclar.append(("kurulum: yayim yoksa kaynaktan derlenir", ""))
+    shutil.rmtree(tmp, ignore_errors=True)
+    return sonuclar
 
 
 def main() -> int:
@@ -132,8 +259,63 @@ def main() -> int:
     else:
         print("ok   bozuk projede sayaclar dolu       %s" % cikti)
 
+    ekstra = 1
+
+    # --fix: the pass that repairs is the pass the counts come from. When both
+    # passes carried --fix, the second had nothing left to repair and
+    # `repaired` was always 0.
+    ekstra += 1
+    kopya = Path(tempfile.mkdtemp()) / "moved"
+    shutil.copytree(KOK / "tests" / "projects" / "moved", kopya)
+    try:
+        kod, cikti, gurultu = run_case(binary, path=str(kopya), fix="true", **{"fail-on": "error"})
+        if kod != 0 or cikti.get("repaired") != "3" or cikti.get("errors") != "0" \
+                or "repaired 3 reference" not in gurultu:
+            kalan += 1
+            print("HATA fix: 3 onarim bekleniyordu: kod %d, %s" % (kod, cikti))
+            print("     " + gurultu.strip().replace("\n", "\n     ")[:600])
+        else:
+            print("ok   %-32s cikis %d, %s" % ("fix, tasinmis proje", kod, cikti))
+    finally:
+        shutil.rmtree(kopya.parent, ignore_errors=True)
+
+    # A path with a space and an `only` list written with spaces are one
+    # argument each: the inputs travel through the environment.
+    ekstra += 1
+    kopya = Path(tempfile.mkdtemp()) / "with space"
+    shutil.copytree(KOK / "tests" / "projects" / "broken", kopya)
+    try:
+        kod, cikti, gurultu = run_case(binary, path=str(kopya), only="missing-resource, case-mismatch",
+                                       **{"fail-on": "never"})
+        if kod != 0 or cikti.get("errors") != "4" or cikti.get("warnings") != "0":
+            kalan += 1
+            print("HATA bosluklu yol / only listesi: kod %d, %s" % (kod, cikti))
+            print("     " + gurultu.strip().replace("\n", "\n     ")[:600])
+        else:
+            print("ok   %-32s cikis %d, %s" % ("bosluklu yol, only listesi", kod, cikti))
+    finally:
+        shutil.rmtree(kopya.parent, ignore_errors=True)
+
+    # A path that is not there fails the step instead of reporting a clean
+    # project.
+    ekstra += 1
+    kod, cikti, gurultu = run_case(binary, path="tests/projects/no-such-project")
+    if kod == 0:
+        kalan += 1
+        print("HATA olmayan yol gecti: %s" % cikti)
+    else:
+        print("ok   %-32s cikis %d" % ("olmayan yol adimi dusurur", kod))
+
+    for ad, sonuc in install_cases(binary):
+        ekstra += 1
+        if sonuc:
+            kalan += 1
+            print("HATA %-32s %s" % (ad, sonuc))
+        else:
+            print("ok   %s" % ad)
+
     print()
-    print("%d vaka, %d sorun" % (len(CASES) + 1, kalan))
+    print("%d vaka, %d sorun" % (len(CASES) + ekstra, kalan))
     return 1 if kalan else 0
 
 

@@ -12,6 +12,22 @@
   `@v0.2.0` goes red on exactly the repositories that are fine. The counts now
   come from `--json`, and `tools/action_smoke.py` runs the action's own `run:`
   block against the clean and broken fixtures at every `--fail-on` level.
+- **The Action never used the binary it downloaded.** On Linux and macOS it
+  looked for `godot-refcheck` at the top of the unpacked archive, but release
+  archives keep it in a `godot-refcheck-<tag>-<target>/` directory, so every
+  run fell back to building from source with `cargo`. It now finds the binary,
+  **verifies it against the release's published `.sha256`** (a mismatch or a
+  missing checksum stops the step), and passes inputs through `env:` rather
+  than pasting them into the script, so a path with a space works.
+- **`fix: true` reported `repaired=0`.** Both passes ran `--fix`, so the second
+  found nothing left to repair; only the JSON pass repairs now, and only
+  applied repairs are counted.
+- **A relative path could scan nothing and exit 0.** From inside a project,
+  `godot-refcheck art` or a typo resolved to an empty root and printed "no
+  problems found". Relative paths now resolve against the working directory,
+  and a path that does not exist exits 2.
+- `tools/action_smoke.py` (now 12 cases, including installing a real release
+  archive offline) runs in CI; before, no workflow ran it.
 
 ### Added
 

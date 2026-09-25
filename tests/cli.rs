@@ -384,3 +384,47 @@ fn json_reports_the_repairs_it_would_make() {
     assert!(o.stdout.contains("res://art/tiles/wall.png"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// --- relative paths --------------------------------------------------------
+//
+// Every other test passes an absolute path. A relative one whose parent is the
+// current directory used to resolve to an empty root: nothing was read, and
+// the run printed "0 files, no problems found." and exited 0. In CI, a typo in
+// the path was a green build.
+
+fn run_in(dir: &PathBuf, args: &[&str]) -> Out {
+    let o = Command::new(bin()).args(args).current_dir(dir).output().expect("failed to run");
+    Out {
+        code: o.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&o.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&o.stderr).to_string(),
+    }
+}
+
+#[test]
+fn a_path_that_does_not_exist_is_a_usage_error() {
+    let o = run_in(&project("broken"), &["no_such_dir"]);
+    assert_eq!(o.code, 2, "{}{}", o.stdout, o.stderr);
+    assert!(o.stderr.contains("does not exist"), "{}", o.stderr);
+}
+
+#[test]
+fn a_relative_subdirectory_scans_the_whole_project() {
+    let o = run_in(&project("broken"), &["art", "--quiet"]);
+    assert_eq!(o.code, 1, "{}{}", o.stdout, o.stderr);
+    assert!(o.stdout.contains("8 errors"), "{}", o.stdout);
+}
+
+#[test]
+fn a_relative_project_file_scans_the_whole_project() {
+    let o = run_in(&project("broken"), &["project.godot", "--quiet"]);
+    assert_eq!(o.code, 1, "{}{}", o.stdout, o.stderr);
+    assert!(o.stdout.contains("8 errors"), "{}", o.stdout);
+}
+
+#[test]
+fn a_relative_script_file_scans_the_whole_project() {
+    let o = run_in(&project("broken"), &["main.gd", "--quiet"]);
+    assert_eq!(o.code, 1, "{}{}", o.stdout, o.stderr);
+    assert!(o.stdout.contains("8 errors"), "{}", o.stdout);
+}

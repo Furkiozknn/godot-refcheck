@@ -77,8 +77,10 @@ jobs:
           # here so a change in what the fixtures report cannot pass silently.
           # Warnings 2 -> 4 with tests/projects/generated: its two uid-only
           # settings beside a git-ignored game/ are warnings by design.
-          if [ "${{ steps.refcheck.outputs.errors }}" != "19" ]; then
-            echo "expected 19 errors from the fixture projects"
+          # Errors 19 -> 20 with tests/projects/bom: one .tres saved with a
+          # byte-order mark the engine cannot parse.
+          if [ "${{ steps.refcheck.outputs.errors }}" != "20" ]; then
+            echo "expected 20 errors from the fixture projects"
             exit 1
           fi
           if [ "${{ steps.refcheck.outputs.warnings }}" != "4" ]; then

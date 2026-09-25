@@ -253,7 +253,7 @@ fn recursive_mode_visits_every_fixture_project() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/projects");
     let o = run(&[root.to_str().unwrap(), "--recursive", "--fail-on", "never", "--quiet"]);
     assert_eq!(o.code, 0, "{}", o.stderr);
-    assert!(o.stdout.contains("9 projects"), "{}", o.stdout);
+    assert!(o.stdout.contains("10 projects"), "{}", o.stdout);
 }
 
 #[test]
@@ -427,4 +427,40 @@ fn a_relative_script_file_scans_the_whole_project() {
     let o = run_in(&project("broken"), &["main.gd", "--quiet"]);
     assert_eq!(o.code, 1, "{}{}", o.stdout, o.stderr);
     assert!(o.stdout.contains("8 errors"), "{}", o.stdout);
+}
+
+// --- byte-order marks -------------------------------------------------------
+
+/// `tests/projects/bom/settings.tres` was saved with a byte-order mark, which
+/// Godot's config parser does not skip. The repair removes those three bytes
+/// and nothing else; the script and the `.uid` file keep theirs, because the
+/// engine reads them fine.
+#[test]
+fn fix_removes_a_byte_order_mark_the_engine_cannot_read_past() {
+    let dir = copy_project("bom", "bom-fix");
+    let before = run(&[dir.to_str().unwrap(), "--quiet"]);
+    assert_eq!(before.code, 1, "{}", before.stdout);
+    assert!(before.stdout.contains("1 errors"), "{}", before.stdout);
+
+    let o = run(&[dir.to_str().unwrap(), "--fix", "--fail-on", "never"]);
+    assert!(o.stdout.contains("repaired 1 reference"), "{}", o.stdout);
+    assert!(o.stdout.contains("settings.tres:1  U+FEFF -> (removed)"), "{}", o.stdout);
+
+    let original = std::fs::read(project("bom").join("settings.tres")).unwrap();
+    let fixed = std::fs::read(dir.join("settings.tres")).unwrap();
+    assert_eq!(&original[..3], b"\xEF\xBB\xBF");
+    assert_eq!(fixed, original[3..]);
+    assert!(std::fs::read(dir.join("tools.gd.uid")).unwrap().starts_with(b"\xEF\xBB\xBF"));
+
+    let after = run(&[dir.to_str().unwrap()]);
+    assert_eq!(after.code, 0, "{}", after.stdout);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_byte_order_mark_repair_is_valid_json() {
+    let o =
+        run(&[project("bom").to_str().unwrap(), "--fix-dry-run", "--json", "--fail-on", "never"]);
+    assert_valid_json(&o.stdout);
+    assert!(o.stdout.contains("\"old\": \"\\ufeff\""), "{}", o.stdout);
 }

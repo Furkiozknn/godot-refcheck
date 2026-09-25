@@ -104,6 +104,14 @@ pub struct Project {
     /// source asset -> the res:// paths its importer produces outside `.godot/`.
     pub import_products: BTreeMap<String, Vec<String>>,
     pub unreadable: Vec<String>,
+    /// Config-format files (`.tscn`, `.tres`, `.import`, `project.godot`,
+    /// `plugin.cfg`, ...) that start with a UTF-8 byte-order mark right in
+    /// front of a `[section]`. Godot's parser does not skip the mark, so the
+    /// first section is lost: a scene or resource fails with `Parse Error:
+    /// Expected '['`, an `.import` is thrown away and redone under a new uid,
+    /// `project.godot` and `plugin.cfg` lose their first section. Scripts,
+    /// shaders and `.uid` files are read through a path that does skip it.
+    pub byte_order_marks: Vec<String>,
     pub godot_version: Option<String>,
     /// Directories inside the project that its own `.gitignore` excludes
     /// (`game`, `builds`). A plugin that generates files there leaves
@@ -352,6 +360,11 @@ pub fn id_references(value: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Extensions Godot reads with its config-file parser (`VariantParser`).
+fn is_config_format(ext: &str) -> bool {
+    matches!(ext, "tscn" | "tres" | "escn" | "import" | "godot" | "cfg")
+}
+
 fn is_text(bytes: &[u8]) -> bool {
     !bytes.iter().take(8000).any(|b| *b == 0)
 }
@@ -411,7 +424,22 @@ impl Project {
             if !is_text(&raw) {
                 continue;
             }
-            let src = String::from_utf8_lossy(&raw).to_string();
+            // A UTF-8 byte-order mark (Windows editors saving "UTF-8 with
+            // signature") is dropped before parsing, so the uid in
+            // `[gd_scene … uid=…]` or a `.uid` file is still known. Where the
+            // engine cannot read past the mark, that is reported against the
+            // file itself (`byte-order-mark`) instead of surfacing as an
+            // `unknown-uid` in whichever file happens to use the uid.
+            let raw = match raw.strip_prefix(b"\xEF\xBB\xBF") {
+                Some(rest) => {
+                    if rest.starts_with(b"[") && is_config_format(&ext) {
+                        pr.byte_order_marks.push(res.clone());
+                    }
+                    rest
+                }
+                None => &raw[..],
+            };
+            let src = String::from_utf8_lossy(raw).to_string();
             match ext.as_str() {
                 "uid" => pr.read_uid_sidecar(&res, &src),
                 "import" => pr.read_import(&res, &src),

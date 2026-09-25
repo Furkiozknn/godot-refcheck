@@ -66,6 +66,7 @@ moved.tres:3: warning: uid-path-mismatch: uid://cpresentaaaaaa resolves to res:/
 | `broken-connection` | error | a signal is connected from or to a node the scene does not contain; the engine drops such a connection without a word, so the callback simply stops arriving |
 | `missing-node-path` | error | a script reaches for `$Head/Body` (or `get_node("Head/Body")`) that the scene it runs in does not contain; the engine hands back `null` and the next line dies at run time, on whichever branch gets there first |
 | `duplicate-class-name` | error | two scripts declare the same global `class_name` |
+| `byte-order-mark` | error | a `.tscn`, `.tres`, `.import`, `project.godot` or `.cfg` was saved as "UTF-8 with signature"; the engine cannot read past the mark, so the scene does not load (Godot 3.6 and 4.4.1: `Parse Error: Expected '['`) |
 | `uid-path-mismatch` | warning | the `uid://` and the path in one reference point at different files; the engine follows the uid and ignores the path you read |
 | `stale-import` | warning | a `.import` file left behind by an asset that was deleted or renamed |
 | `unused-asset` | note | nothing in the project appears to reference this asset (opt-in, advisory) |
@@ -162,8 +163,9 @@ something was found, `2` the project could not be read.
 
 A missing reference usually has exactly one possible answer: the file is still
 there under a different spelling, the `uid://` already resolves somewhere, or
-exactly one file in the project carries that name. `--fix` applies those and
-leaves everything else alone. It never guesses: two files with the same name
+exactly one file in the project carries that name. `--fix` applies those, and
+removes a byte-order mark the engine cannot read past, and leaves everything
+else alone. It never guesses: two files with the same name
 mean no repair, and a path written with a locale suffix or a `..` step is left
 for a person.
 
@@ -243,7 +245,7 @@ place against real projects and against the engine itself.
 
 **The engine is the reference.** `tools/verify_with_godot.py` runs a real
 headless Godot over the fixture projects and compares what the engine prints
-with what `godot-refcheck` reports. Eight cases have a matching engine message.
+with what `godot-refcheck` reports. Nine cases have a matching engine message.
 The rest are listed as static-only with the reason the engine stays silent, and
 one fixture exists purely to show the engine accepting a project that is broken.
 Two round trips close the loop: a fixture and a real demo are broken by moving
@@ -262,6 +264,7 @@ godot 4.4.1-stable as the reference implementation
   [ok] broken   unknown-uid        engine=yes refcheck=yes
   [ok] scripts  missing-resource   engine=yes refcheck=yes
   [ok] scripts  duplicate-class-name engine=yes refcheck=yes
+  [ok] bom      byte-order-mark    engine=yes refcheck=yes
 
   [static-only] broken-connection  the engine drops a connection it cannot resolve without a word, so the signal simply stops arriving
   [static-only] stale-import       leftover import metadata is ignored rather than reported
@@ -279,7 +282,7 @@ godot 4.4.1-stable as the reference implementation
 
   [ok] dodge_the_creeps: moved 2 folders, 13 references went stale, 0 left after --fix, engine errors after=0
 
-8 engine-confirmed cases, 3 healthy projects, 1 case the engine keeps quiet about and one repair round trip: all matched.
+9 engine-confirmed cases, 3 healthy projects, 1 case the engine keeps quiet about and one repair round trip: all matched.
 ```
 
 **Working projects are the other reference.** `tools/corpus.py` scans eleven

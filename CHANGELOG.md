@@ -30,6 +30,20 @@
   `missing-resource` error for their own `addons/` folder. A folder that holds
   files now satisfies a project-setting reference; a misspelt one is still
   reported. The corpus result is unchanged at 50.
+- **A byte-order mark no longer hides a uid, and is reported where it is.**
+  A file saved as "UTF-8 with signature" starts with three bytes that stood in
+  front of `[gd_scene … uid=…]` or `uid://…`, so the uid was never read: a
+  project using it got an `unknown-uid` error in a different file, and a scene
+  loaded by path got nothing at all. The mark is now skipped when reading. A
+  headless Godot 3.6 and 4.4.1 skip it too in scripts, shaders and `.uid`
+  files, but not in `.tscn`, `.tres`, `.import`, `project.godot` or
+  `plugin.cfg`, where it breaks the first `[section]` (`Parse Error: Expected
+  '['`, a re-import under a new uid, a lost section, a plugin that does not
+  load). That is a new error, `byte-order-mark`, on the file itself, and
+  `--fix` removes the three bytes. `tools/verify_with_godot.py` checks it
+  against the engine with the new `tests/projects/bom` fixture, so the fixture
+  error count in CI goes from 19 to 20. The corpus result is unchanged at 50:
+  none of its 17,198 files starts with a mark in front of a section.
 
 ## 0.3.0
 

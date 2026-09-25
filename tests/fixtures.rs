@@ -500,3 +500,94 @@ fn a_setting_that_names_an_existing_directory_is_not_missing() {
     assert!(!p.is_dir("res://addon"));
     assert!(!p.is_dir("res://icon.svg"));
 }
+
+/// A small project written from code, not committed as a fixture, so no editor
+/// or formatter can quietly drop a byte-order mark from it.
+fn scratch_project(tag: &str, files: &[(&str, String)]) -> (Project, Vec<Finding>) {
+    let d = std::env::temp_dir().join(format!("refcheck-{}-{}", tag, std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    for (name, body) in files {
+        let path = d.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+    let p = Project::load(&d);
+    let f = checks::run(&p, &Options::default());
+    let _ = std::fs::remove_dir_all(&d);
+    (p, f)
+}
+
+const BOM: &str = "\u{feff}";
+
+/// Windows editors that save "UTF-8 with signature" (Visual Studio, Notepad
+/// before 2019, PowerShell 5's `Out-File -Encoding utf8`) put a byte-order
+/// mark in front of the first line. Godot 3.6 and 4.4.1 read scripts, shaders
+/// and `.uid` files past it without a word, and so must this: a `.uid` file
+/// with a mark had its uid dropped, and every use of that uid became an
+/// `unknown-uid` error somewhere else.
+#[test]
+fn a_byte_order_mark_the_engine_skips_is_skipped() {
+    let (p, f) = scratch_project(
+        "bom-skipped",
+        &[
+            (
+                "project.godot",
+                format!("{BOM}; Engine configuration file.\nconfig_version=5\n\n[autoload]\nG=\"*uid://dgsidecar00001\"\n"),
+            ),
+            ("g.gd", format!("{BOM}class_name Bommed\nextends Node\n")),
+            ("g.gd.uid", format!("{BOM}uid://dgsidecar00001\n")),
+            ("twin.gd", "class_name Bommed\nextends Node\n".to_string()),
+        ],
+    );
+    assert_eq!(p.uid_owner.get("uid://dgsidecar00001").map(String::as_str), Some("res://g.gd"));
+    // The class_name behind the mark is read: the twin is caught.
+    assert_eq!(files(&f, "duplicate-class-name").len(), 2, "{:#?}", f);
+    assert!(of(&f, "unknown-uid").is_empty(), "{:#?}", f);
+    assert!(of(&f, "byte-order-mark").is_empty(), "{:#?}", f);
+}
+
+/// In front of a `[section]` the mark breaks Godot's config parser (measured
+/// with 3.6 and 4.4.1): a scene or resource fails with `Parse Error: Expected
+/// '['` and its uid is never registered. That used to show up as an
+/// `unknown-uid` error in the file that used the uid, and as nothing at all
+/// when the scene was loaded by path. The error now names the file that has to
+/// change, once, and the uid behind the mark still resolves so the same
+/// problem is not reported a second time elsewhere.
+#[test]
+fn a_byte_order_mark_before_a_section_is_reported_on_that_file() {
+    let (p, f) = scratch_project(
+        "bom-section",
+        &[
+            (
+                "project.godot",
+                "config_version=5\n\n[application]\nrun/main_scene=\"uid://bq2kx8y7n3a1c\"\n".to_string(),
+            ),
+            (
+                "a.tscn",
+                format!("{BOM}[gd_scene format=3 uid=\"uid://bq2kx8y7n3a1c\"]\n\n[node name=\"A\" type=\"Node2D\"]\n"),
+            ),
+            (
+                "r.tres",
+                format!("{BOM}[gd_resource type=\"Resource\" format=3 uid=\"uid://cbomtres00001\"]\n\n[resource]\n"),
+            ),
+            ("h.gd", "extends Node\nvar r = load(\"res://r.tres\")\n".to_string()),
+            ("addons/p/plugin.cfg", format!("{BOM}[plugin]\nname=\"p\"\nscript=\"p.gd\"\n")),
+            ("addons/p/p.gd", "@tool\nextends EditorPlugin\n".to_string()),
+        ],
+    );
+    assert_eq!(p.uid_owner.get("uid://bq2kx8y7n3a1c").map(String::as_str), Some("res://a.tscn"));
+    let bom = of(&f, "byte-order-mark");
+    let got: Vec<(&str, usize, Level)> =
+        bom.iter().map(|x| (x.file.as_str(), x.line, x.level)).collect();
+    assert_eq!(
+        got,
+        [
+            ("res://a.tscn", 1, Level::Error),
+            ("res://addons/p/plugin.cfg", 1, Level::Error),
+            ("res://r.tres", 1, Level::Error)
+        ],
+        "{:#?}",
+        f
+    );
+    assert_eq!(f.len(), 3, "only the three marks: {:#?}", f);
+}

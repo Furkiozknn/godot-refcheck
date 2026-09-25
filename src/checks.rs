@@ -225,6 +225,20 @@ pub fn run(p: &Project, o: &Options) -> Vec<Finding> {
         }
     }
 
+    if o.wants("byte-order-mark") {
+        for file in &p.byte_order_marks {
+            out.push(Finding {
+                project: String::new(),
+                check: "byte-order-mark",
+                level: Level::Error,
+                file: file.clone(),
+                line: 1,
+                message: "starts with a UTF-8 byte-order mark, which Godot reads as part of the first line".into(),
+                evidence: bom_effect(file).into(),
+            });
+        }
+    }
+
     if o.unused && o.wants("unused-asset") {
         out.extend(unused_assets(p));
     }
@@ -233,9 +247,33 @@ pub fn run(p: &Project, o: &Options) -> Vec<Finding> {
     out
 }
 
+/// What the engine does with a config-format file that starts with a
+/// byte-order mark, measured with Godot 3.6 and 4.4.1.
+fn bom_effect(file: &str) -> &'static str {
+    if file.ends_with(".import") {
+        "Godot cannot read it, so the asset is re-imported under a new uid and every uid:// reference to it breaks"
+    } else if file.ends_with(".godot") || file.ends_with(".cfg") {
+        "Godot skips the first section: settings in it are not applied, a plugin.cfg does not load"
+    } else {
+        "Godot does not load it: Parse Error: Expected '['"
+    }
+}
+
 /// Repairs that follow from the project as it is, with no guessing involved.
 pub fn repairs(p: &Project, o: &Options) -> Vec<Fix> {
     let mut out = Vec::new();
+    if o.wants("byte-order-mark") {
+        for file in &p.byte_order_marks {
+            out.push(Fix {
+                check: "byte-order-mark",
+                file: file.clone(),
+                line: 1,
+                old: fix::BOM.to_string(),
+                new: String::new(),
+                reason: "the byte-order mark is removed; nothing else in the file changes".into(),
+            });
+        }
+    }
     let dup = duplicate_uids(p);
     let names = fix::by_name(p);
     for r in &p.refs {

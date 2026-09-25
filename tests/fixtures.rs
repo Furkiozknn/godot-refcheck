@@ -159,7 +159,9 @@ fn a_godot_3_project_is_understood() {
 
 /// Everything in this project looks broken to a naive reader and is not:
 /// a dead Godot 3 `[locale]` block, locale-suffixed remaps, run-time paths,
-/// an editor-written `[replication]` block and a sub-resource path.
+/// an editor-written `[replication]` block, a sub-resource path, and a copy
+/// of the main scene - same uid, a reference to a missing file - kept in a
+/// directory Godot is told to skip with `.gdignore`.
 #[test]
 fn shapes_that_only_look_broken_produce_no_error() {
     let f = scan("tricky");
@@ -172,6 +174,16 @@ fn the_unused_scan_finds_the_one_asset_nothing_points_at() {
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].file, "res://dead/unused.tres");
     assert_eq!(f[0].level, Level::Info);
+}
+
+#[test]
+fn a_gdignored_directory_is_not_read() {
+    let p = Project::load(&project_dir("tricky"));
+    assert!(
+        p.files.iter().all(|f| !f.starts_with("res://extras/")),
+        "a file under a .gdignore'd directory was read"
+    );
+    assert!(p.refs.iter().all(|r| !r.from.starts_with("res://extras/")));
 }
 
 #[test]

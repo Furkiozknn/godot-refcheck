@@ -4,23 +4,25 @@ Rules are only worth having if they stay quiet on projects that work. These
 eleven repositories are real, maintained Godot projects; `tools/corpus.py`
 clones them and runs `godot-refcheck` over every `project.godot` inside.
 
-Measured on 2026-09-22 with the code released as godot-refcheck 0.3.0, shallow clones of the default
-branch unless a branch is named.
+Findings measured on 2026-09-22 with the code released as godot-refcheck 0.3.0, and
+re-measured on 2026-09-25 after `.gdignore` support: the findings are identical,
+the file counts are lower because a directory Godot does not scan is no longer
+read. Shallow clones of the default branch unless a branch is named.
 
 | repository | projects | files | references | findings |
 | --- | ---: | ---: | ---: | ---: |
-| godotengine/godot-demo-projects | 139 | 4,040 | 2,023 | 9 |
-| godotengine/godot-demo-projects@3.x | 89 | 2,257 | 1,452 | 12 |
-| godotengine/godot-benchmarks | 1 | 896 | 73 | 0 |
-| Orama-Interactive/Pixelorama | 1 | 1,380 | 684 | 0 |
-| RodZill4/material-maker | 1 | 2,912 | 997 | 24 |
+| godotengine/godot-demo-projects | 139 | 3,738 | 2,023 | 9 |
+| godotengine/godot-demo-projects@3.x | 89 | 2,061 | 1,452 | 12 |
+| godotengine/godot-benchmarks | 1 | 843 | 73 | 0 |
+| Orama-Interactive/Pixelorama | 1 | 1,258 | 684 | 0 |
+| RodZill4/material-maker | 1 | 1,883 | 997 | 24 |
 | mbrlabs/Lorien | 1 | 212 | 133 | 0 |
-| GDQuest/godot-open-rpg | 1 | 1,373 | 643 | 5 |
-| Maaack/godot-game-template | 1 | 740 | 356 | 0 |
-| Maaack/Godot-Menus-Template | 1 | 593 | 215 | 0 |
-| MakovWait/godots | 1 | 4,070 | 174 | 0 |
-| bitbrain/beehave | 1 | 832 | 154 | 0 |
-| **total** | **237** | **19,305** | **6,904** | **50** |
+| GDQuest/godot-open-rpg | 1 | 1,371 | 643 | 5 |
+| Maaack/godot-game-template | 1 | 543 | 356 | 0 |
+| Maaack/Godot-Menus-Template | 1 | 405 | 215 | 0 |
+| MakovWait/godots | 1 | 4,061 | 174 | 0 |
+| bitbrain/beehave | 1 | 823 | 154 | 0 |
+| **total** | **237** | **17,198** | **6,904** | **50** |
 
 50 findings: 35 errors and 15 warnings. Each one was checked by hand against
 the repository it came from, and each one is a real defect. No other reference

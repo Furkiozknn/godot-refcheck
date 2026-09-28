@@ -67,6 +67,9 @@ pub struct Project {
     pub root: PathBuf,
     /// res:// paths present on disk.
     pub files: BTreeSet<String>,
+    /// res:// paths on disk under a `.gdignore`d directory: they exist, but
+    /// Godot never scans them, so nothing in them is read.
+    pub ignored: BTreeSet<String>,
     /// lowercase res:// path -> the real spelling on disk.
     pub lower: HashMap<String, String>,
     /// res:// paths that no importer writes to disk but the engine can still load
@@ -101,7 +104,19 @@ pub struct Project {
     /// source asset -> the res:// paths its importer produces outside `.godot/`.
     pub import_products: BTreeMap<String, Vec<String>>,
     pub unreadable: Vec<String>,
+    /// Config-format files (`.tscn`, `.tres`, `.import`, `project.godot`,
+    /// `plugin.cfg`, ...) that start with a UTF-8 byte-order mark right in
+    /// front of a `[section]`. Godot's parser does not skip the mark, so the
+    /// first section is lost: a scene or resource fails with `Parse Error:
+    /// Expected '['`, an `.import` is thrown away and redone under a new uid,
+    /// `project.godot` and `plugin.cfg` lose their first section. Scripts,
+    /// shaders and `.uid` files are read through a path that does skip it.
+    pub byte_order_marks: Vec<String>,
     pub godot_version: Option<String>,
+    /// Directories inside the project that its own `.gitignore` excludes
+    /// (`game`, `builds`). A plugin that generates files there leaves
+    /// uid-only references that a fresh clone cannot resolve.
+    pub gitignored_dirs: Vec<String>,
 }
 
 const SKIP_DIRS: &[&str] = &[".godot", ".git", ".import", ".svn", ".hg", "node_modules", ".vs"];
@@ -121,7 +136,61 @@ pub fn find_project_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+/// Plain directory names a `.gitignore` excludes: `/game`, `game/`,
+/// `/game/**`. Wildcards, negations, dotted names (files, or hidden
+/// directories such as `.godot`) are left out: the point is only to know
+/// whether generated project content is kept out of git.
+pub fn gitignored_dirs(src: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in src.lines() {
+        let l = line.trim();
+        if l.is_empty() || l.starts_with('#') || l.starts_with('!') {
+            continue;
+        }
+        let mut d = l.trim_start_matches('/');
+        for suffix in ["/**", "/*", "/"] {
+            if let Some(s) = d.strip_suffix(suffix) {
+                d = s;
+                break;
+            }
+        }
+        if d.is_empty() || d.contains(['*', '?', '[', '/', '.']) {
+            continue;
+        }
+        // Names every .gitignore template carries that never hold project
+        // content: OS litter, caches and export output.
+        const NOT_CONTENT: &[&str] = &[
+            "DS_Store",
+            "__pycache__",
+            "node_modules",
+            "build",
+            "builds",
+            "export",
+            "exports",
+            "dist",
+            "bin",
+            "obj",
+            "mono",
+            "android",
+        ];
+        if NOT_CONTENT.contains(&d) {
+            continue;
+        }
+        if !out.iter().any(|x| x == d) {
+            out.push(d.to_string());
+        }
+    }
+    out
+}
+
+/// Files under a `.gdignore`d directory: present on disk, never parsed.
+fn walk_present(dir: &Path, out: &mut Vec<PathBuf>) {
+    let mut sink = Vec::new();
+    walk(dir, out, &mut sink);
+    out.append(&mut sink);
+}
+
+fn walk(dir: &Path, out: &mut Vec<PathBuf>, ignored: &mut Vec<PathBuf>) {
     let rd = match fs::read_dir(dir) {
         Ok(r) => r,
         Err(_) => return,
@@ -142,7 +211,20 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
             if SKIP_DIRS.contains(&name.as_str()) {
                 continue;
             }
-            walk(&p, out);
+            // Godot does not scan a directory holding a `.gdignore` file, or
+            // anything under it: nothing there is imported, given a uid or
+            // registered as a class. Reading it anyway turned a kept-aside
+            // copy of a sample project (KoBeWi/Metroidvania-System,
+            // `Extensions/`) into fifteen duplicate-uid and
+            // duplicate-class-name errors. The files are still on disk,
+            // though, and a load by path still finds them in the editor
+            // (material-maker's demo scenes load `examples/*.ptex` that way),
+            // so they are collected as present - just never read.
+            if p.join(".gdignore").is_file() {
+                walk_present(&p, ignored);
+                continue;
+            }
+            walk(&p, out, ignored);
         } else if ft.is_file() {
             out.push(p);
         }
@@ -278,13 +360,27 @@ pub fn id_references(value: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Extensions Godot reads with its config-file parser (`VariantParser`).
+fn is_config_format(ext: &str) -> bool {
+    matches!(ext, "tscn" | "tres" | "escn" | "import" | "godot" | "cfg")
+}
+
 fn is_text(bytes: &[u8]) -> bool {
     !bytes.iter().take(8000).any(|b| *b == 0)
 }
 
 impl Project {
     pub fn exists(&self, res: &str) -> bool {
-        self.files.contains(res) || self.generated.contains(res)
+        self.files.contains(res) || self.generated.contains(res) || self.ignored.contains(res)
+    }
+
+    /// Whether `res` names a directory that holds at least one file, read or
+    /// `.gdignore`d.
+    pub fn is_dir(&self, res: &str) -> bool {
+        let prefix = format!("{}/", res.trim_end_matches('/'));
+        [&self.files, &self.ignored]
+            .iter()
+            .any(|set| set.range(prefix.clone()..).next().is_some_and(|f| f.starts_with(&prefix)))
     }
 
     pub fn case_variant(&self, res: &str) -> Option<&String> {
@@ -298,8 +394,15 @@ impl Project {
     pub fn load(root: &Path) -> Project {
         let mut pr = Project { root: root.to_path_buf(), ..Default::default() };
         let mut disk = Vec::new();
-        walk(root, &mut disk);
+        let mut ignored = Vec::new();
+        walk(root, &mut disk, &mut ignored);
 
+        for p in &ignored {
+            if let Some(res) = to_res(root, p) {
+                pr.lower.entry(res.to_ascii_lowercase()).or_insert_with(|| res.clone());
+                pr.ignored.insert(res);
+            }
+        }
         for p in &disk {
             if let Some(res) = to_res(root, p) {
                 pr.lower.entry(res.to_ascii_lowercase()).or_insert_with(|| res.clone());
@@ -324,7 +427,22 @@ impl Project {
             if !is_text(&raw) {
                 continue;
             }
-            let src = String::from_utf8_lossy(&raw).to_string();
+            // A UTF-8 byte-order mark (Windows editors saving "UTF-8 with
+            // signature") is dropped before parsing, so the uid in
+            // `[gd_scene … uid=…]` or a `.uid` file is still known. Where the
+            // engine cannot read past the mark, that is reported against the
+            // file itself (`byte-order-mark`) instead of surfacing as an
+            // `unknown-uid` in whichever file happens to use the uid.
+            let raw = match raw.strip_prefix(b"\xEF\xBB\xBF") {
+                Some(rest) => {
+                    if rest.starts_with(b"[") && is_config_format(&ext) {
+                        pr.byte_order_marks.push(res.clone());
+                    }
+                    rest
+                }
+                None => &raw[..],
+            };
+            let src = String::from_utf8_lossy(raw).to_string();
             match ext.as_str() {
                 "uid" => pr.read_uid_sidecar(&res, &src),
                 "import" => pr.read_import(&res, &src),
@@ -337,6 +455,10 @@ impl Project {
             if name == "project.godot" && res == "res://project.godot" {
                 pr.read_project_godot(&res, &src);
             }
+        }
+
+        if let Ok(src) = fs::read_to_string(root.join(".gitignore")) {
+            pr.gitignored_dirs = gitignored_dirs(&src);
         }
 
         for d in &pr.uid_decls {
@@ -755,6 +877,12 @@ fn prefix(section: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gitignored_dirs_keeps_only_plain_directory_names() {
+        let src = "# comment\n/game\n/game/**\npopochiu/\n/addons/*\n!/addons/keep/\n.godot/\n*.import\ndata_*/\nexport.cfg\nbuild/web\nDS_Store\n__pycache__/\n/builds/\n";
+        assert_eq!(gitignored_dirs(src), vec!["game", "popochiu", "addons"]);
+    }
 
     #[test]
     fn sub_resource_suffix_is_stripped() {

@@ -1,0 +1,6 @@
+# the plugin writes its autoload scripts here on setup
+/game
+/game/**
+.godot/
+*.import
+!/addons/keep/

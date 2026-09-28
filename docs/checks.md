@@ -40,6 +40,14 @@ Quiet when: the uid is unknown but the same reference also carries a path that
 exists. The engine falls back to the path and loads the resource, so nothing is
 broken.
 
+A warning instead of an error when: the reference is a project setting and the
+project's own `.gitignore` excludes a directory inside it. A plugin may generate
+the file there on setup, and a fresh clone cannot tell that apart from a broken
+reference. popochiu writes its autoloads into a git-ignored `game/`, and every
+one of them was reported as an error. The warning names the ignored
+directories. OS litter, caches and export output (`DS_Store`, `__pycache__`,
+`build`, `export`, …) do not count, because nothing is generated there.
+
 ## `duplicate-uid` (error)
 
 Two files declare the same `uid://`. This is what copying a `.tscn`, a `.tres`
@@ -92,6 +100,33 @@ and the second script fails to load.
 Quiet when: the word appears in a comment or a string, or is used as an
 identifier — only a real top-level declaration counts.
 
+## `byte-order-mark` (error)
+
+A `.tscn`, `.tres`, `.escn`, `.import`, `project.godot` or `.cfg` file starts
+with a UTF-8 byte-order mark directly in front of its first `[section]`. Windows
+editors that save "UTF-8 with signature" write one (Visual Studio, Notepad
+before 2019, PowerShell 5's `Out-File -Encoding utf8`); Godot itself never does.
+
+Godot's config-file parser does not skip the mark, so the first line is not a
+section header any more. Measured with Godot 3.6 and 4.4.1:
+
+| file | what the engine does |
+| --- | --- |
+| `.tscn`, `.tres` | `Parse Error: Expected '['`; the file does not load, and its `uid://` is never registered |
+| `.import` | the metadata is discarded and the asset re-imported under a **new** uid, so every `uid://` reference to it breaks |
+| `project.godot` | the first section is not read: `[application]` there means "no main scene defined" |
+| `plugin.cfg` | the plugin does not load, without an error |
+
+The finding is reported once, on the file that has to change. Its uid is still
+read, so a scene that uses it by uid is not reported a second time as
+`unknown-uid`.
+
+Quiet when: the mark is in a script, a shader or a `.uid` file — the engine
+reads those past it — or the first line after it is a `;` comment, which is
+what Godot writes at the top of `project.godot`.
+
+Repair: `--fix` removes the three bytes and changes nothing else.
+
 ## `uid-path-mismatch` (warning)
 
 One reference carries both a `uid://` and a path, and they resolve to different
@@ -121,13 +156,14 @@ to every static tool, this one included.
 ## Repairs
 
 `--fix` rewrites a reference only when the project itself settles what it should
-say. Three cases qualify:
+say. Three cases qualify, plus one that is not a reference at all:
 
 | finding | what makes the answer certain |
 | --- | --- |
 | `case-mismatch` | the file is on disk, spelled differently |
 | `uid-path-mismatch` | the `uid://` already resolves to a file, and the engine is loading that one |
 | `missing-resource` | exactly one file in the whole project carries that name |
+| `byte-order-mark` | the three bytes in front of the first `[` are the whole problem |
 
 Everything else is reported and left alone. Two files with the same name give no
 single answer, so nothing is proposed. A path written with a locale suffix
@@ -139,5 +175,5 @@ A repair is a single-line, in-place edit of the exact text that was written. The
 rest of the file — ordering, spacing, line endings — is untouched, and nothing
 is ever deleted: a leftover `.import` file is reported, never removed.
 
-Against the eleven corpus repositories, 19,305 files in projects that work,
+Against the eleven corpus repositories, 17,198 files in projects that work,
 `--fix-dry-run` proposes no change at all.

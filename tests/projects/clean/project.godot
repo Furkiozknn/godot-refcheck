@@ -21,3 +21,9 @@ locale/translations=PackedStringArray("res://translations/text.en.translation")
 locale/translation_remaps={
 "res://icon.svg": PackedStringArray("res://icon.svg:tr")
 }
+
+[debug]
+
+gdscript/warnings/directory_rules={
+"res://addons": 0
+}

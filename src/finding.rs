@@ -113,6 +113,11 @@ pub const CHECKS: &[CheckInfo] = &[
         summary: "two scripts declare the same global class_name",
     },
     CheckInfo {
+        id: "byte-order-mark",
+        level: Level::Error,
+        summary: "a .tscn/.tres/.import/.cfg starts with a UTF-8 BOM that Godot cannot read past",
+    },
+    CheckInfo {
         id: "uid-path-mismatch",
         level: Level::Warning,
         summary: "uid:// and path in the same reference point at different files",

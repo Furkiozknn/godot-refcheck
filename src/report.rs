@@ -12,6 +12,7 @@ pub fn esc(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
+            '\u{feff}' => out.push_str("\\ufeff"),
             c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
             c => out.push(c),
         }
@@ -186,7 +187,12 @@ pub fn fixes(applied: &[crate::fix::Applied], dry: bool) -> String {
         if a.ok {
             s.push_str(&format!(
                 "  {}:{}  {} -> {}\n      {} ({})\n",
-                rel, a.fix.line, a.fix.old, a.fix.new, a.fix.reason, a.fix.check
+                rel,
+                a.fix.line,
+                crate::fix::shown(&a.fix.old),
+                crate::fix::shown(&a.fix.new),
+                a.fix.reason,
+                a.fix.check
             ));
         } else {
             s.push_str(&format!("  {}:{}  not repaired: {}\n", rel, a.fix.line, a.note));

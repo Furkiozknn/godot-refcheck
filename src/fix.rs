@@ -10,6 +10,19 @@ use std::path::Path;
 
 use crate::project::Project;
 
+/// A UTF-8 byte-order mark, as text.
+pub const BOM: &str = "\u{feff}";
+
+/// How a repaired text is shown: a byte-order mark and an empty replacement
+/// are invisible otherwise.
+pub fn shown(text: &str) -> String {
+    match text {
+        "" => "(removed)".to_string(),
+        BOM => "U+FEFF".to_string(),
+        t => t.to_string(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fix {
     pub check: &'static str,

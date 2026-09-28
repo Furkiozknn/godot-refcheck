@@ -167,6 +167,22 @@ fn find_projects(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// The project `path` belongs to. A relative path whose parent is the current
+/// directory (`art`, `main.gd`, `project.godot`) has an empty parent, and the
+/// root found from it was the empty path: nothing was read and the run
+/// reported a clean project. Such a path, and a relative one whose project
+/// sits above the current directory, is resolved from the current directory.
+fn locate_project(path: &Path) -> Option<PathBuf> {
+    match find_project_root(path) {
+        Some(r) if !r.as_os_str().is_empty() => Some(r),
+        found if path.is_relative() => match std::env::current_dir() {
+            Ok(cwd) => find_project_root(&cwd.join(path)),
+            Err(_) => found.filter(|r| !r.as_os_str().is_empty()),
+        },
+        found => found,
+    }
+}
+
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = match parse_args(argv) {
@@ -191,6 +207,11 @@ fn main() -> ExitCode {
         }
     };
 
+    if !args.path.exists() {
+        eprintln!("godot-refcheck: {} does not exist", args.path.display());
+        return ExitCode::from(2);
+    }
+
     let mut roots: Vec<PathBuf> = Vec::new();
     if args.recursive {
         find_projects(&args.path, &mut roots);
@@ -199,7 +220,7 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     } else {
-        match find_project_root(&args.path) {
+        match locate_project(&args.path) {
             Some(r) => roots.push(r),
             None => {
                 eprintln!(

@@ -38,6 +38,7 @@ ENGINE_CASES = [
     ("broken", "unknown-uid", "Unrecognized UID"),
     ("scripts", "missing-resource", 'Could not resolve super class path "res://no_such_base.gd"'),
     ("scripts", "duplicate-class-name", 'Class "Hero" hides a global script class'),
+    ("bom", "byte-order-mark", "res://settings.tres:1 - Parse Error: Expected '['"),
 ]
 
 # Checks the engine cannot report on its own, with the reason they still matter.

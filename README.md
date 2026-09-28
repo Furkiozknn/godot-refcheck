@@ -2,6 +2,9 @@
 
 # godot-refcheck
 
+<p align="center"><img src="docs/reel/reel.gif" alt="godot-refcheck - 15-second motion reel" width="720"></p>
+<p align="center"><sub><a href="docs/reel/reel.mp4">MP4 version with sound</a></sub></p>
+
 **Find broken resource references in a Godot project without opening the editor — and repair the ones that have a single provable answer.**
 
 [![CI](https://github.com/Furkiozknn/godot-refcheck/actions/workflows/ci.yml/badge.svg)](https://github.com/Furkiozknn/godot-refcheck/actions/workflows/ci.yml)

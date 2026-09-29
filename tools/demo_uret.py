@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # references. The last command is a mistyped level, to show the error message.
 COMMANDS = [
     "godot-refcheck --version",
+    "godot-refcheck --list-checks | head -n 5",
     "godot-refcheck moved",
     "godot-refcheck moved --fix",
     "godot-refcheck moved",

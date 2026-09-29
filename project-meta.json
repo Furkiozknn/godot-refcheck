@@ -45,14 +45,14 @@
     "hero": "assets/banner.svg",
     "screenshots": [],
     "gifs": [
-      "assets/demo.gif"
+      "docs/demo/demo.gif"
     ],
     "videos": []
   },
   "tests": {
-    "count": 147,
-    "source": "CI log: `=== 147 tests passed ===`",
-    "measured": "2026-09-25"
+    "count": 152,
+    "source": "CI log: `=== 152 tests passed ===`",
+    "measured": "2026-09-30"
   },
   "ci": {
     "workflows": [

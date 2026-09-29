@@ -1,0 +1,53 @@
+# godot-refcheck terminal demo: real commands, real output
+# tarih: 2026-09-30T02:08:27+03:00
+# surum: godot-refcheck 0.3.0
+# fixture: tests/projects/moved (bu deponun kendi test projesi), gecici klasore kopyalanip kosuldu
+# her komut bash -c 'set -o pipefail; ...' ile kosuldu; hicbir satir elle yazilmadi
+
+$ godot-refcheck --version
+godot-refcheck 0.3.0
+[cikis kodu 0] (0.10 s)
+
+$ godot-refcheck --list-checks | head -n 5
+missing-resource     error    a referenced res:// file is not in the project
+case-mismatch        error    a reference differs from the file on disk only by letter case
+unknown-uid          error    a uid:// reference matches no file and has no usable path fallback
+duplicate-uid        error    two files claim the same uid://
+undeclared-id        error    ExtResource()/SubResource() uses an id the file never declares
+[cikis kodu 0] (0.21 s)
+
+$ godot-refcheck moved
+godot-refcheck 0.3.0  moved
+
+level.gd:3: error: missing-resource: res://scenes/player.tscn is not in the project
+    preload/load - the only file with that name is res://player.tscn
+level.tscn:4: error: missing-resource: res://art/wall.png is not in the project
+    ext_resource (Texture2D) - the only file with that name is res://art/tiles/wall.png
+level.tscn:5: error: case-mismatch: res://ui/icon.png does not exist; the file on disk is res://ui/Icon.png
+    ext_resource (Texture2D) - loads on Windows and macOS, fails on Linux and in exported builds
+
+9 files, 5 references: 3 errors, 0 warnings, 0 notes.
+[cikis kodu 1] (0.11 s)
+
+$ godot-refcheck moved --fix
+repaired 3 references
+  level.gd:3  res://scenes/player.tscn -> res://player.tscn
+      res://player.tscn is the only file named player.tscn (missing-resource)
+  level.tscn:4  res://art/wall.png -> res://art/tiles/wall.png
+      res://art/tiles/wall.png is the only file named wall.png (missing-resource)
+  level.tscn:5  res://ui/icon.png -> res://ui/Icon.png
+      the file on disk is spelled that way (case-mismatch)
+
+godot-refcheck 0.3.0  moved
+  9 files, 5 references, no problems found.
+[cikis kodu 0] (0.09 s)
+
+$ godot-refcheck moved
+godot-refcheck 0.3.0  moved
+  9 files, 5 references, no problems found.
+[cikis kodu 0] (0.09 s)
+
+$ godot-refcheck moved --fail-on warnin
+godot-refcheck: unknown level: warnin (expected error, warning, info or never)
+Run 'godot-refcheck --help' for the options, examples and exit codes.
+[cikis kodu 2] (0.08 s)

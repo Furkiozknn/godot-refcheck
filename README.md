@@ -318,7 +318,7 @@ dead `[locale]` block Godot 3 leaves behind,
 `ExtResource( 1 )` — are all carried in the test suite as named regression
 tests, because each of them once produced a false finding here.
 
-`cargo test` runs 147 tests, all offline.
+`cargo test` runs 152 tests, all offline.
 
 ## Limitations
 

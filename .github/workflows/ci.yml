@@ -37,6 +37,15 @@ jobs:
           if [ "${total}" -lt 1 ]; then exit 1; fi
       - name: Build
         run: cargo build --release
+      - name: Keep the binary (tools/demo_uret.py records the README demo from it)
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-refcheck-${{ runner.os }}
+          path: |
+            target/release/godot-refcheck
+            target/release/godot-refcheck.exe
+          if-no-files-found: error
+          retention-days: 14
       - name: Check the fixtures from the command line
         shell: bash
         run: |

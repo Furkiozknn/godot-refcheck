@@ -37,11 +37,20 @@ OPTIONS:
     -h, --help           print this help
     -V, --version        print the version
 
+EXAMPLES:
+    godot-refcheck                       check the project in this directory
+    godot-refcheck . --fix-dry-run       show what --fix would repair, change nothing
+    godot-refcheck . --fix               repair what has a single provable answer
+    godot-refcheck repos --recursive     every project.godot under repos/
+    godot-refcheck . --only duplicate-uid,case-mismatch
+
 EXIT CODES:
     0  no finding at or above --fail-on
     1  at least one finding at or above --fail-on
-    2  the project could not be read
+    2  usage error, or the project could not be read
 ";
+
+const HINT: &str = "Run 'godot-refcheck --help' for the options, examples and exit codes.";
 
 struct Args {
     path: PathBuf,
@@ -103,13 +112,19 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                 a.fail_on = if v.eq_ignore_ascii_case("never") {
                     None
                 } else {
-                    Some(Level::parse(&v).ok_or_else(|| format!("unknown level: {}", v))?)
+                    Some(Level::parse(&v).ok_or_else(|| {
+                        format!("unknown level: {} (expected error, warning, info or never)", v)
+                    })?)
                 };
             }
             other if other.starts_with('-') => return Err(format!("unknown option: {}", other)),
             other => {
                 if seen_path {
-                    return Err("only one PATH is accepted".into());
+                    return Err(format!(
+                        "only one PATH is accepted (got {} and {}); use --recursive to scan a directory of projects",
+                        a.path.display(),
+                        other
+                    ));
                 }
                 a.path = PathBuf::from(other);
                 seen_path = true;
@@ -124,7 +139,10 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     for set in [a.opts.only.as_ref(), Some(&a.opts.skip)].into_iter().flatten() {
         for id in set {
             if !known.contains(id.as_str()) {
-                return Err(format!("unknown check: {}", id));
+                return Err(format!(
+                    "unknown check: {} (godot-refcheck --list-checks shows the names)",
+                    id
+                ));
             }
         }
     }
@@ -196,13 +214,14 @@ fn main() -> ExitCode {
             return ExitCode::from(0);
         }
         Err(e) if e == "@checks" => {
+            let width = CHECKS.iter().map(|c| c.id.len()).max().unwrap_or(0);
             for c in CHECKS {
-                println!("{:<18} {:<8} {}", c.id, c.level.as_str(), c.summary);
+                println!("{:<width$} {:<8} {}", c.id, c.level.as_str(), c.summary, width = width);
             }
             return ExitCode::from(0);
         }
         Err(e) => {
-            eprintln!("godot-refcheck: {}\n\n{}", e, USAGE);
+            eprintln!("godot-refcheck: {}\n{}", e, HINT);
             return ExitCode::from(2);
         }
     };
@@ -216,7 +235,10 @@ fn main() -> ExitCode {
     if args.recursive {
         find_projects(&args.path, &mut roots);
         if roots.is_empty() {
-            eprintln!("godot-refcheck: no project.godot found under {}", args.path.display());
+            eprintln!(
+                "godot-refcheck: no project.godot found under {} (--recursive looks for project.godot files below the directory)",
+                args.path.display()
+            );
             return ExitCode::from(2);
         }
     } else {
@@ -224,7 +246,7 @@ fn main() -> ExitCode {
             Some(r) => roots.push(r),
             None => {
                 eprintln!(
-                    "godot-refcheck: {} is not inside a Godot project (no project.godot found)",
+                    "godot-refcheck: {} is not inside a Godot project (no project.godot found); pass the project folder, or use --recursive for a folder of projects",
                     args.path.display()
                 );
                 return ExitCode::from(2);
@@ -236,7 +258,11 @@ fn main() -> ExitCode {
         Some(path) => match std::fs::read_to_string(path) {
             Ok(text) => baseline::parse(&text),
             Err(e) => {
-                eprintln!("godot-refcheck: cannot read {}: {}", path.display(), e);
+                eprintln!(
+                    "godot-refcheck: cannot read baseline {}: {} (--write-baseline <file> creates one)",
+                    path.display(),
+                    e
+                );
                 return ExitCode::from(2);
             }
         },

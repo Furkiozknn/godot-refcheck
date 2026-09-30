@@ -232,6 +232,70 @@ fn an_unknown_check_name_is_a_usage_error() {
 }
 
 #[test]
+fn a_usage_error_names_the_way_out_without_repeating_the_whole_help() {
+    let clean = project("clean");
+    let clean = clean.to_str().unwrap();
+    for (args, needle) in [
+        (vec![clean, "--nope"], "unknown option: --nope"),
+        (vec![clean, "--only", "not-a-check"], "--list-checks"),
+        (vec![clean, "--fail-on", "bogus"], "expected error, warning, info or never"),
+        (vec![clean, "--only"], "--only needs a value"),
+    ] {
+        let o = run(&args);
+        assert_eq!(o.code, 2, "{:?}", args);
+        assert!(o.stderr.contains(needle), "{:?}: {}", args, o.stderr);
+        assert!(o.stderr.contains("godot-refcheck --help"), "{:?}: {}", args, o.stderr);
+        assert!(!o.stderr.contains("USAGE:"), "{:?} dumped the whole help: {}", args, o.stderr);
+        assert!(o.stderr.lines().count() <= 3, "{:?}: {}", args, o.stderr);
+        assert!(o.stdout.is_empty(), "{:?}: {}", args, o.stdout);
+    }
+}
+
+#[test]
+fn a_second_path_is_named_in_the_error() {
+    let o = run(&[project("clean").to_str().unwrap(), "second-dir"]);
+    assert_eq!(o.code, 2);
+    assert!(o.stderr.contains("second-dir"), "{}", o.stderr);
+    assert!(o.stderr.contains("--recursive"), "{}", o.stderr);
+}
+
+#[test]
+fn a_folder_without_a_project_says_what_to_pass_instead() {
+    let o = run(&[std::env::temp_dir().to_str().unwrap()]);
+    assert_eq!(o.code, 2);
+    assert!(o.stderr.contains("--recursive"), "{}", o.stderr);
+}
+
+#[test]
+fn help_shows_examples_and_the_exit_codes() {
+    let o = run(&["--help"]);
+    assert_eq!(o.code, 0);
+    assert!(o.stdout.contains("EXAMPLES:"));
+    assert!(o.stdout.contains("godot-refcheck . --fix-dry-run"));
+    assert!(o.stdout.contains("EXIT CODES:"));
+    assert!(o.stderr.is_empty());
+}
+
+#[test]
+fn list_checks_lines_up_its_columns() {
+    let o = run(&["--list-checks"]);
+    let starts: Vec<usize> = o
+        .stdout
+        .lines()
+        .map(|l| {
+            let after_id = l.find(' ').unwrap();
+            let rest = &l[after_id..];
+            let level_at = after_id + (rest.len() - rest.trim_start().len());
+            let tail = &l[level_at..];
+            let gap = tail.find(' ').unwrap();
+            level_at + gap + (tail[gap..].len() - tail[gap..].trim_start().len())
+        })
+        .collect();
+    assert!(starts.len() >= 12, "{}", o.stdout);
+    assert!(starts.iter().all(|s| *s == starts[0]), "{:?}\n{}", starts, o.stdout);
+}
+
+#[test]
 fn help_and_version_exit_zero() {
     assert_eq!(run(&["--help"]).code, 0);
     let v = run(&["--version"]);

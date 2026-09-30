@@ -2,9 +2,6 @@
 
 # godot-refcheck
 
-<p align="center"><img src="docs/reel/reel.gif" alt="godot-refcheck - 15-second motion reel" width="720"></p>
-<p align="center"><sub><a href="docs/reel/reel.mp4">MP4 version with sound</a></sub></p>
-
 **Find broken resource references in a Godot project without opening the editor — and repair the ones that have a single provable answer.**
 
 [![CI](https://github.com/Furkiozknn/godot-refcheck/actions/workflows/ci.yml/badge.svg)](https://github.com/Furkiozknn/godot-refcheck/actions/workflows/ci.yml)
@@ -12,9 +9,23 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![No dependencies](https://img.shields.io/badge/dependencies-none-lightgrey)](Cargo.toml)
 
-![godot-refcheck finding three broken references in a Godot project, repairing them with --fix, and finding nothing on the next run](assets/demo.gif)
+```sh
+cargo install --git https://github.com/Furkiozknn/godot-refcheck   # or unpack a release binary, see Install
+godot-refcheck path/to/project        # 0 clean, 1 findings, 2 usage error or unreadable project
+```
 
-<sub>Real output from <code>tests/projects/moved</code>, a fixture in this repository: an asset folder was moved and the references were not. Three findings, three repairs, then a clean run. The engine agrees — <code>tools/verify_with_godot.py</code> hands the same project to a headless Godot before and after.</sub>
+![godot-refcheck finding three broken references in a Godot project, repairing them with --fix, finding nothing on the next run, and rejecting a mistyped option](docs/demo/demo.gif)
+
+<sub>Real output, recorded by <code>tools/demo_uret.py</code> from <code>tests/projects/moved</code>, a fixture in this repository: an asset folder was moved and the references were not. Three findings, three repairs, a clean run, then a mistyped option. The plain-text record is <a href="docs/demo/komutlar.txt">docs/demo/komutlar.txt</a>. The engine agrees with the findings: <code>tools/verify_with_godot.py</code> hands the same project to a headless Godot before and after.</sub>
+
+**Use it** as a CI gate on scenes, resources and scripts; after moving or
+renaming an asset folder (`--fix`); before an export to Linux from a project
+built on Windows or macOS (case mismatches); after merging branches that each
+copied the same file (duplicate `uid://`).
+
+**Do not expect it** to type-check GDScript, to know whether a connected method
+exists, or to follow a path built at run time. It reads project files; it does
+not run the game. [Limitations](#limitations) has the full list.
 
 A scene loses a texture, a script preloads a file somebody renamed, two copied
 files end up with the same `uid://`, a folder is `Art/` on one machine and
@@ -160,7 +171,9 @@ godot-refcheck . --baseline refcheck-baseline.txt
 ```
 
 Exit codes: `0` nothing at or above `--fail-on` (default `error`), `1`
-something was found, `2` the project could not be read.
+something was found, `2` a usage error or a project that could not be read.
+A usage error prints one line saying what was wrong and points at `--help`,
+which has examples.
 
 ## Repairing what can be proved
 
@@ -305,7 +318,7 @@ dead `[locale]` block Godot 3 leaves behind,
 `ExtResource( 1 )` — are all carried in the test suite as named regression
 tests, because each of them once produced a false finding here.
 
-`cargo test` runs 147 tests, all offline.
+`cargo test` runs 152 tests, all offline.
 
 ## Limitations
 
@@ -343,6 +356,7 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 python3 tools/verify_with_godot.py --download
 python3 tools/corpus.py
+python3 tools/demo_uret.py --bin target/release/godot-refcheck   # re-records docs/demo (needs node + playwright + ffmpeg for the gif)
 ```
 
 ## License

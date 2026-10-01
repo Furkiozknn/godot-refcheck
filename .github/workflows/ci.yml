@@ -38,7 +38,7 @@ jobs:
       - name: Build
         run: cargo build --release
       - name: Keep the binary (tools/demo_uret.py records the README demo from it)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: godot-refcheck-${{ runner.os }}
           path: |

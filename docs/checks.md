@@ -90,6 +90,26 @@ be wired to a built-in method — `queue_free`, `clear`, `set_h_offset` — and 
 the engine knows the full class API, so a static answer there would be wrong
 often enough to matter.
 
+## `missing-node-path` (error)
+
+A script reaches for `$Head/Body`, or `get_node("Head/Body")` with a literal
+argument, and the scene it runs in does not contain that node. The path is
+resolved from the node the script is attached to, through the same scene graph
+as `broken-connection`.
+
+The engine's answer: `null` for a path it cannot find, so the failure lands one
+line later, at run time, on whichever branch gets there first.
+
+Quiet when: no scene attaches the script (an autoload, a `RefCounted` helper);
+the script is attached to several scenes and at least one of them has the node,
+or a scene in the chain cannot be read; the call asks another node
+(`other.get_node(...)`); the path is guarded with `has_node("…")` or read with
+`get_node_or_null`; the missing segment is a name some script assigns at run
+time (`n.name = "Aletler"` before `add_child`) or the root name of a scene in
+the project, which is the name `add_child(scene.instantiate())` gives the child;
+or the path is `$"quoted"`, built at run time, or uses a `%` unique name, a `..`
+step or `/root/...`.
+
 ## `duplicate-class-name` (error)
 
 Two scripts declare the same global `class_name`.

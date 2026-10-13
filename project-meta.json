@@ -32,7 +32,7 @@
     "static-analysis",
     "zero-dependency"
   ],
-  "summary": "Godot reports a broken resource reference only when that scene loads, and a dead signal connection never at all. godot-refcheck reads the project files instead: missing paths, case-only breakage, uid problems, connections to nodes that are gone. It repairs the ones with a single provable answer.",
+  "summary": "Finds broken resource references, uid problems and dead signal connections in Godot projects without opening the editor, and repairs those with a single provable answer. Rust CLI and GitHub Action.",
   "key_features": [
     "Twelve checks over .tscn, .tres, project.godot, .import, plugin.cfg, GDScript and shaders, in both the Godot 3 and Godot 4 formats",
     "Node paths resolve through instanced, inherited and placeholder scenes, so a dead signal connection is found without ever calling a healthy one broken",

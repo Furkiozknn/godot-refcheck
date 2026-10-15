@@ -182,6 +182,7 @@ godot-refcheck . --unused          # also list assets nothing references
 godot-refcheck repos --recursive   # every project.godot under a directory
 godot-refcheck . --json            # machine-readable
 godot-refcheck . --sarif out.sarif # for GitHub code scanning
+godot-refcheck . --annotations     # GitHub Actions annotations, on the PR diff
 godot-refcheck . --only duplicate-uid,case-mismatch
 godot-refcheck . --skip stale-import --fail-on warning
 godot-refcheck . --fix                 # repair what can be proved, in place
@@ -253,7 +254,7 @@ jobs:
 ```
 
 Inputs: `path`, `recursive`, `unused`, `only`, `skip`, `fail-on`, `sarif`,
-`fix`, `fix-dry-run`, `baseline`, `version`. Outputs: `errors`, `warnings`,
+`annotations`, `fix`, `fix-dry-run`, `baseline`, `version`. Outputs: `errors`, `warnings`,
 `notes`, `findings`, `repaired`.
 
 The action runs the release binary for the runner's platform, and only after
@@ -274,6 +275,22 @@ scanning and appear inline on the changed lines of a pull request:
         with:
           sarif_file: refcheck.sarif
 ```
+
+Code scanning needs the `security-events: write` permission, and on a private
+repository it needs GitHub Advanced Security. Annotations need neither: the
+action prints every finding as a workflow command (`annotations`, on by
+default), and the runner places it on its file and line, so a pull request
+shows it in the diff:
+
+```
+::error file=game/level.tscn,line=4,title=godot-refcheck missing-resource::res://art/wall.png is not in the project%0Aext_resource (Texture2D)
+```
+
+GitHub displays at most ten error and ten warning annotations per step. The
+step summary always has the full report. `--sarif` and `--annotations` name
+each file relative to the current directory, which in a workflow is the
+checkout, so a project in `game/` is reported as `game/level.tscn`, not as
+`level.tscn`.
 
 ## Why the results can be trusted
 
@@ -339,7 +356,7 @@ dead `[locale]` block Godot 3 leaves behind,
 `ExtResource( 1 )` — are all carried in the test suite as named regression
 tests, because each of them once produced a false finding here.
 
-`cargo test` runs 169 tests, all offline.
+`cargo test` runs 176 tests, all offline.
 
 ## Limitations
 

@@ -17,8 +17,21 @@
   corpus or on 166 in this account's Godot repositories, so the corpus total
   stays at 50. Its fixture lives in `tests/standalone/inputmap`, outside
   `tests/projects`, because CI's action job pins the totals of that tree.
+- **`--annotations`, and the Action's `annotations` input (on by default).**
+  Each finding is printed as a GitHub workflow command, which the runner
+  shows on that file and line of a pull request with no code-scanning setup.
+  Code scanning needs `security-events: write`, and on a private repository
+  GitHub Advanced Security. Messages are escaped so that a file name cannot
+  end the command or start another one.
 
 ### Fixed
+
+- **SARIF locations are relative to the checkout, not to the scanned
+  directory.** A project in `game/` produced `"uri": "main.tscn"`, which code
+  scanning cannot place, since the repository has `game/main.tscn`. This
+  repository's own upload (`path: tests/projects`) had the same problem. The
+  uri is now the file's path relative to the current directory, which in a
+  workflow is the checkout. Annotations use the same path.
 
 - **A `.gdignore`d directory is no longer read.** Godot does not scan a
   directory that holds a `.gdignore` file: nothing in it is imported, given a

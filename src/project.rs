@@ -101,6 +101,17 @@ pub struct Project {
     pub scene_root_names: BTreeSet<String>,
     /// script res:// path -> the node paths it guards with `has_node(...)`.
     pub script_guarded_paths: BTreeMap<String, BTreeSet<String>>,
+    /// Actions `project.godot` defines under `[input]`.
+    pub input_map: BTreeSet<String>,
+    /// script res:// path -> `(line, method, action)` for every Input Map
+    /// action it names with a literal; see `gdscript::input_actions`.
+    pub input_action_uses: BTreeMap<String, Vec<(usize, String, String)>>,
+    /// Actions some script adds at run time or tests for with `has_action`.
+    pub runtime_input_actions: BTreeSet<String>,
+    /// Scripts that add actions under a computed name (`add_action(name)`).
+    pub computed_input_actions: Vec<String>,
+    /// Query methods (`is_action_pressed`, ...) a script defines itself.
+    pub shadowed_action_queries: BTreeSet<String>,
     /// source asset -> the res:// paths its importer produces outside `.godot/`.
     pub import_products: BTreeMap<String, Vec<String>>,
     pub unreadable: Vec<String>,
@@ -686,6 +697,21 @@ impl Project {
             if !claims.is_empty() {
                 self.script_node_paths.insert(res.to_string(), claims);
             }
+            let actions = gdscript::input_actions(src);
+            self.runtime_input_actions.extend(actions.added);
+            self.runtime_input_actions.extend(actions.guarded);
+            self.shadowed_action_queries.extend(actions.shadowed);
+            if actions.computed_add {
+                self.computed_input_actions.push(res.to_string());
+            }
+            let uses: Vec<(usize, String, String)> = actions
+                .uses
+                .into_iter()
+                .map(|(off, method, action)| (cfgfile::line_of(src, off), method, action))
+                .collect();
+            if !uses.is_empty() {
+                self.input_action_uses.insert(res.to_string(), uses);
+            }
         }
         for (off, raw) in gdscript::resource_loads(src) {
             let line = cfgfile::line_of(src, off);
@@ -792,6 +818,9 @@ impl Project {
                 Entry::Assign(a) => {
                     if !ENGINE_SECTIONS.contains(&section.as_str()) {
                         continue;
+                    }
+                    if section == "input" {
+                        self.input_map.insert(cfgfile::unquote(&a.key));
                     }
                     if a.key == "config/features" {
                         let v = cfgfile::string_literals(&a.value);

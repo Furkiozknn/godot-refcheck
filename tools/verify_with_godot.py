@@ -26,6 +26,8 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECTS = os.path.join(ROOT, "tests", "projects")
+# Fixtures kept out of tests/projects, whose totals CI's action job pins.
+STANDALONE = os.path.join(ROOT, "tests", "standalone")
 GODOT_VERSION = "4.4.1-stable"
 
 # (project, check id, substring the engine must print)
@@ -39,7 +41,14 @@ ENGINE_CASES = [
     ("scripts", "missing-resource", 'Could not resolve super class path "res://no_such_base.gd"'),
     ("scripts", "duplicate-class-name", 'Class "Hero" hides a global script class'),
     ("bom", "byte-order-mark", "res://settings.tres:1 - Parse Error: Expected '['"),
+    # Printed by the `--quit` run, when main.gd's _ready() reaches the line.
+    ("inputmap", "missing-input-action", 'The InputMap action "jmup" doesn\'t exist'),
 ]
+
+
+def project_dir(name):
+    standalone = os.path.join(STANDALONE, name)
+    return standalone if os.path.isdir(standalone) else os.path.join(PROJECTS, name)
 
 # Checks the engine cannot report on its own, with the reason they still matter.
 STATIC_ONLY = {
@@ -199,7 +208,7 @@ def main():
     engine_output = {}
     findings = {}
     for name in sorted(set([c[0] for c in ENGINE_CASES] + CLEAN_PROJECTS + list(SILENT_CASES))):
-        project = os.path.join(PROJECTS, name)
+        project = project_dir(name)
         engine_output[name] = run_engine(godot, project)
         findings[name] = run_refcheck(args.binary, project)
 

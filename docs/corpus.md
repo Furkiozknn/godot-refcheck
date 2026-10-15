@@ -30,6 +30,14 @@ in those 6,904 produced a finding, none of the 2,741 signal connections in these
 projects was wrongly called broken, none of the 880 `class_name` declarations
 collided, and `--fix-dry-run` proposes no change anywhere in the corpus.
 
+`missing-input-action` adds nothing to the total. Before it was written in
+Rust, a Python mirror of the rule was run over the same eleven repositories on
+2026-10-15: of about 865 literal action names in their scripts, the 173 in
+Pixelorama are not judged (it adds its shortcuts with
+`InputMap.add_action(action)`), and every one of the other 690 or so is
+defined under `[input]`, built in (`ui_*`) or added at run time. The weekly
+`--expect` run holds the binary to the same total of 50.
+
 ## The sixteen dead connections
 
 All sixteen are in `material-maker`, and Godot reports none of them: a

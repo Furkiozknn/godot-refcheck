@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+
+- **`missing-input-action`: a script asks for an action the Input Map does
+  not have.** `Input.is_action_pressed("jmup")` next to a `jump` action under
+  `[input]` is `false` on every frame, and Godot prints `The InputMap action
+  "jmup" doesn't exist` only on the frame the line runs. The check reads
+  literal action names from the eleven `Input`/`InputEvent` methods that take
+  one, and names the nearest defined action when exactly one is within two
+  edits. It treats actions added or tested for at run time as present, skips
+  `addons/`, and skips a project that adds actions under computed names
+  (Pixelorama). Measured with a Python mirror of the rule before it was
+  written in Rust: nothing reported on about 690 literal action names in the
+  corpus or on 166 in this account's Godot repositories, so the corpus total
+  stays at 50. Its fixture lives in `tests/standalone/inputmap`, outside
+  `tests/projects`, because CI's action job pins the totals of that tree.
+
 ### Fixed
 
 - **A `.gdignore`d directory is no longer read.** Godot does not scan a

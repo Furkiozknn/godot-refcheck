@@ -79,6 +79,7 @@ moved.tres:3: warning: uid-path-mismatch: uid://cpresentaaaaaa resolves to res:/
 | `undeclared-id` | error | a scene uses `ExtResource("3")` or `SubResource("x")` that the file never declares |
 | `broken-connection` | error | a signal is connected from or to a node the scene does not contain; the engine drops such a connection without a word, so the callback simply stops arriving |
 | `missing-node-path` | error | a script reaches for `$Head/Body` (or `get_node("Head/Body")`) that the scene it runs in does not contain; the engine hands back `null` and the next line dies at run time, on whichever branch gets there first |
+| `missing-input-action` | error | a script asks for `Input.is_action_pressed("jmup")` and the project's Input Map has no such action; the check is `false` on every frame, and the engine only says so on the frame the line runs |
 | `duplicate-class-name` | error | two scripts declare the same global `class_name` |
 | `byte-order-mark` | error | a `.tscn`, `.tres`, `.import`, `project.godot` or `.cfg` was saved as "UTF-8 with signature"; the engine cannot read past the mark, so the scene does not load (Godot 3.6 and 4.4.1: `Parse Error: Expected '['`) |
 | `uid-path-mismatch` | warning | the `uid://` and the path in one reference point at different files; the engine follows the uid and ignores the path you read |
@@ -123,6 +124,25 @@ projects survives on both the 4.x and the 3.x branch. Across the five Godot
 projects on this account — 850-odd files — it reports nothing, which is the
 result code that runs should get; the fixture under `tests/projects/nodepath`
 is where it is proved to bite.
+
+`missing-input-action` is the same kind of claim about the Input Map: a
+literal action name in `is_action_pressed`, `is_action_just_pressed`,
+`is_action_just_released`, `is_action_released`, `is_action`,
+`get_action_strength`, `get_action_raw_strength`, `action_press`,
+`action_release`, `get_axis` or `get_vector` has to be under `[input]` in
+`project.godot` or be one of the built-in `ui_*` actions. A rename in the
+Input Map editor that the scripts did not follow, or a typo on a branch that
+rarely runs, is otherwise found by a player. When it fires it names the
+defined action one or two edits away, if exactly one is that close. It stays
+quiet about an action some script adds (`InputMap.add_action("dash")`, a
+literal `"input/dash"` project setting) or asks about first
+(`InputMap.has_action("dash")`), about scripts under `addons/`, and about a
+whole project that calls `add_action` with a computed name, because such a
+project can define actions no file spells out. Pixelorama builds its whole
+shortcut map that way. Across the corpus below it reports nothing on about
+690 literal action names, and nothing on the 166 in this account's own
+Godot repositories. The engine message it predicts is checked by
+`tools/verify_with_godot.py` against `tests/standalone/inputmap`.
 
 References are collected from `.tscn`, `.tres`, `.escn`, `project.godot`,
 `.import`, `plugin.cfg`, `.gd`/`.cs` (`preload()` and `load()` with a literal
@@ -262,7 +282,7 @@ place against real projects and against the engine itself.
 
 **The engine is the reference.** `tools/verify_with_godot.py` runs a real
 headless Godot over the fixture projects and compares what the engine prints
-with what `godot-refcheck` reports. Nine cases have a matching engine message.
+with what `godot-refcheck` reports. Ten cases have a matching engine message.
 The rest are listed as static-only with the reason the engine stays silent, and
 one fixture exists purely to show the engine accepting a project that is broken.
 Two round trips close the loop: a fixture and a real demo are broken by moving
@@ -282,6 +302,7 @@ godot 4.4.1-stable as the reference implementation
   [ok] scripts  missing-resource   engine=yes refcheck=yes
   [ok] scripts  duplicate-class-name engine=yes refcheck=yes
   [ok] bom      byte-order-mark    engine=yes refcheck=yes
+  [ok] inputmap missing-input-action engine=yes refcheck=yes
 
   [static-only] broken-connection  the engine drops a connection it cannot resolve without a word, so the signal simply stops arriving
   [static-only] stale-import       leftover import metadata is ignored rather than reported
@@ -299,7 +320,7 @@ godot 4.4.1-stable as the reference implementation
 
   [ok] dodge_the_creeps: moved 2 folders, 13 references went stale, 0 left after --fix, engine errors after=0
 
-9 engine-confirmed cases, 3 healthy projects, 1 case the engine keeps quiet about and one repair round trip: all matched.
+10 engine-confirmed cases, 3 healthy projects, 1 case the engine keeps quiet about and one repair round trip: all matched.
 ```
 
 **Working projects are the other reference.** `tools/corpus.py` scans eleven
@@ -318,7 +339,7 @@ dead `[locale]` block Godot 3 leaves behind,
 `ExtResource( 1 )` — are all carried in the test suite as named regression
 tests, because each of them once produced a false finding here.
 
-`cargo test` runs 152 tests, all offline.
+`cargo test` runs 169 tests, all offline.
 
 ## Limitations
 
@@ -346,7 +367,11 @@ tests, because each of them once produced a false finding here.
 - Whether a connected method exists is not checked: a signal may legitimately be
   wired to a built-in method such as `queue_free` or `set_h_offset`, and only the
   engine knows the full class API.
-- C# is read for `preload`/`load` calls only; it is not parsed as C#.
+- C# is read for `preload`/`load` calls only; it is not parsed as C#, and
+  `missing-input-action` reads GDScript only.
+- `missing-input-action` judges a literal action name only. An action stored
+  in a variable or an exported property is decided at run time, and a project
+  that adds actions under computed names is not judged at all.
 
 ## Development
 

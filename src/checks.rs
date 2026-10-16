@@ -190,6 +190,10 @@ pub fn run(p: &Project, o: &Options) -> Vec<Finding> {
         out.extend(missing_node_paths(p));
     }
 
+    if o.wants("missing-input-action") {
+        out.extend(missing_input_actions(p));
+    }
+
     if o.wants("duplicate-class-name") {
         for (name, owners) in &p.class_names {
             if owners.len() < 2 {
@@ -516,6 +520,117 @@ fn built_at_runtime(p: &Project, tree: &crate::scene::Tree, path: &str) -> bool 
         }
     }
     false
+}
+
+/// `Input.is_action_pressed("jmup")` naming an action the project never defines.
+///
+/// The engine answers `false` on every frame and prints `The InputMap action
+/// "jmup" doesn't exist` - but only when that line runs, so a typo in a
+/// rarely-taken branch, or an action renamed in the Input Map and not in the
+/// scripts, ships. The project's own `[input]` section is the whole list the
+/// engine starts with, apart from the `ui_*` actions every project has.
+///
+/// QUIET BY CONSTRUCTION, for the same reason as the node-path check:
+///
+/// 1. Only a literal action is judged; a variable is decided at run time.
+/// 2. An action some script adds (`InputMap.add_action("dash")`, a literal
+///    `"input/dash"` setting) or tests for first (`has_action("dash")`) is
+///    treated as present, wherever in the project that happens.
+/// 3. A project where any script calls `add_action` with a computed name is
+///    not judged at all: it can define actions no file spells out. Pixelorama
+///    builds its whole shortcut map that way.
+/// 4. A method name some script defines itself (`func is_action(...)`) is not
+///    the engine's for certain, so calls by that name are skipped.
+/// 5. Scripts under `res://addons/` are skipped: an addon names the actions
+///    its documentation asks the user to add, and that is not this project's
+///    defect until the addon's code runs.
+fn missing_input_actions(p: &Project) -> Vec<Finding> {
+    let mut out = Vec::new();
+    if !p.computed_input_actions.is_empty() {
+        return out;
+    }
+    for (script, uses) in &p.input_action_uses {
+        if script.starts_with("res://addons/") {
+            continue;
+        }
+        for (line, method, action) in uses {
+            if action.starts_with("ui_")
+                || p.input_map.contains(action)
+                || p.runtime_input_actions.contains(action)
+                || p.shadowed_action_queries.contains(method)
+            {
+                continue;
+            }
+            let hint = match closest_action(action, &p.input_map) {
+                Some(near) => format!("; the closest action it does define is \"{}\"", near),
+                None => String::new(),
+            };
+            out.push(Finding {
+                project: String::new(),
+                check: "missing-input-action",
+                level: Level::Error,
+                file: script.clone(),
+                line: *line,
+                message: format!("input action \"{}\" is not in the project's Input Map", action),
+                evidence: format!(
+                    "{}() gets false on every frame, and the engine says 'The InputMap action \"{}\" doesn't exist' only when the line runs{}",
+                    method, action, hint
+                ),
+            });
+        }
+    }
+    out
+}
+
+/// The defined action a typo most likely meant: same letters in another case,
+/// or at most two edits away. `None` when nothing is that close, or when two
+/// candidates are equally close and picking one would be a guess.
+fn closest_action(action: &str, defined: &BTreeSet<String>) -> Option<String> {
+    let mut best: Option<(usize, &String)> = None;
+    let mut tied = false;
+    for d in defined {
+        let dist = if d.eq_ignore_ascii_case(action) { 0 } else { edit_distance(action, d) };
+        if dist > 2 {
+            continue;
+        }
+        match best {
+            Some((b, _)) if dist > b => {}
+            Some((b, _)) if dist == b => tied = true,
+            _ => {
+                best = Some((dist, d));
+                tied = false;
+            }
+        }
+    }
+    match best {
+        Some((_, d)) if !tied => Some(d.clone()),
+        _ => None,
+    }
+}
+
+/// Levenshtein distance, counting a swap of two neighbouring letters as one
+/// edit (`jmup` -> `jump`), which is the typo people actually make.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut d = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in d.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for (j, cell) in d[0].iter_mut().enumerate() {
+        *cell = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            let mut v = (d[i - 1][j] + 1).min(d[i][j - 1] + 1).min(d[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                v = v.min(d[i - 2][j - 2] + 1);
+            }
+            d[i][j] = v;
+        }
+    }
+    d[a.len()][b.len()]
 }
 
 fn origin(r: &crate::project::Reference) -> String {

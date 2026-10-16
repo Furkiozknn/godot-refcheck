@@ -108,6 +108,11 @@ pub const CHECKS: &[CheckInfo] = &[
         summary: "a script reaches for $Node/Path that the scene it runs in does not contain",
     },
     CheckInfo {
+        id: "missing-input-action",
+        level: Level::Error,
+        summary: "a script asks for an Input Map action the project never defines",
+    },
+    CheckInfo {
         id: "duplicate-class-name",
         level: Level::Error,
         summary: "two scripts declare the same global class_name",

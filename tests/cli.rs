@@ -465,6 +465,57 @@ fn run_in(dir: &PathBuf, args: &[&str]) -> Out {
     }
 }
 
+// --- GitHub: annotations and SARIF locations ------------------------------
+//
+// Both are resolved by GitHub against the checkout. A uri relative to the
+// scanned directory instead (`main.tscn` for a project in `game/`) points at
+// a file the repository does not have.
+
+#[test]
+fn annotations_name_each_file_relative_to_the_working_directory() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let args = ["tests/projects", "--recursive", "--annotations", "--fail-on", "never"];
+    let o = run_in(&root, &args);
+    assert_eq!(o.code, 0, "{}", o.stderr);
+    assert!(
+        o.stdout.contains("::error file=tests/projects/broken/main.tscn,line=4,"),
+        "{}",
+        o.stdout
+    );
+    assert!(o.stdout.contains(",title=godot-refcheck missing-resource::"), "{}", o.stdout);
+    assert!(o.stdout.contains("::warning file=tests/projects/broken/moved.tres,"), "{}", o.stdout);
+    assert!(o.stdout.lines().all(|l| l.starts_with("::")), "{}", o.stdout);
+}
+
+#[test]
+fn annotations_keep_the_exit_code_of_the_text_report() {
+    assert_eq!(run(&[project("broken").to_str().unwrap(), "--annotations"]).code, 1);
+    let o = run(&[project("clean").to_str().unwrap(), "--annotations"]);
+    assert_eq!(o.code, 0, "{}", o.stderr);
+    assert!(o.stdout.is_empty(), "{}", o.stdout);
+}
+
+#[test]
+fn json_and_annotations_together_are_a_usage_error() {
+    let o = run(&[project("clean").to_str().unwrap(), "--json", "--annotations"]);
+    assert_eq!(o.code, 2);
+    assert!(o.stderr.contains("--annotations"), "{}", o.stderr);
+}
+
+#[test]
+fn sarif_uris_are_relative_to_the_working_directory() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let out = std::env::temp_dir().join(format!("refcheck-uri-{}.sarif", std::process::id()));
+    let sarif = out.to_str().unwrap();
+    let o = run_in(&root, &["tests/projects/broken", "--sarif", sarif, "--fail-on", "never"]);
+    assert_eq!(o.code, 0, "{}", o.stderr);
+    let text = std::fs::read_to_string(&out).unwrap();
+    assert_valid_json(&text);
+    assert!(text.contains("\"uri\": \"tests/projects/broken/main.tscn\""), "{}", text);
+    assert!(!text.contains("\"uri\": \"main.tscn\""), "{}", text);
+    let _ = std::fs::remove_file(&out);
+}
+
 #[test]
 fn a_path_that_does_not_exist_is_a_usage_error() {
     let o = run_in(&project("broken"), &["no_such_dir"]);

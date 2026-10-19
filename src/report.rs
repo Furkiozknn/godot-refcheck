@@ -92,7 +92,48 @@ pub fn json(
     s
 }
 
-pub fn sarif(findings: &[Finding]) -> String {
+/// GitHub Actions workflow commands, one per finding. The runner turns each
+/// into an annotation on that file and line, and a pull request shows it on
+/// its diff with no code-scanning setup. `uri` gives the file relative to the
+/// checkout.
+pub fn annotations(findings: &[Finding], uri: &dyn Fn(&Finding) -> String) -> String {
+    let mut s = String::new();
+    for f in findings {
+        let level = match f.level {
+            Level::Error => "error",
+            Level::Warning => "warning",
+            Level::Info => "notice",
+        };
+        let text = if f.evidence.is_empty() {
+            f.message.clone()
+        } else {
+            format!("{}\n{}", f.message, f.evidence)
+        };
+        s.push_str(&format!(
+            "::{} file={},line={},title={}::{}\n",
+            level,
+            command_property(&uri(f)),
+            f.line.max(1),
+            command_property(&format!("godot-refcheck {}", f.check)),
+            command_data(&text)
+        ));
+    }
+    s
+}
+
+/// A workflow command's message, escaped the way the runner unescapes it.
+pub fn command_data(s: &str) -> String {
+    s.replace('%', "%25").replace('\r', "%0D").replace('\n', "%0A")
+}
+
+/// A workflow command's property value, where `:` and `,` also separate.
+pub fn command_property(s: &str) -> String {
+    command_data(s).replace(':', "%3A").replace(',', "%2C")
+}
+
+/// SARIF 2.1.0. `uri` gives each finding's file relative to the checkout,
+/// which is what code scanning resolves an `artifactLocation` against.
+pub fn sarif(findings: &[Finding], uri: &dyn Fn(&Finding) -> String) -> String {
     let mut s = String::new();
     s.push_str("{\n  \"version\": \"2.1.0\",\n");
     s.push_str("  \"$schema\": \"https://json.schemastore.org/sarif-2.1.0.json\",\n");
@@ -125,7 +166,7 @@ pub fn sarif(findings: &[Finding]) -> String {
             } else {
                 format!("{} ({})", f.message, f.evidence)
             }),
-            esc(&f.located()),
+            esc(&uri(f)),
             f.line.max(1)
         ));
         if n + 1 < findings.len() {
@@ -223,4 +264,54 @@ pub fn fixes_json(applied: &[crate::fix::Applied]) -> String {
     }
     s.push_str("  ],\n");
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn finding(level: Level, message: &str, evidence: &str) -> Finding {
+        Finding {
+            project: String::new(),
+            check: "missing-resource",
+            level,
+            file: "res://levels/one.tscn".into(),
+            line: 4,
+            message: message.into(),
+            evidence: evidence.into(),
+        }
+    }
+
+    #[test]
+    fn an_annotation_is_one_workflow_command_per_finding() {
+        let f = [
+            finding(Level::Error, "res://a.png is not in the project", "ext_resource"),
+            finding(Level::Warning, "w", ""),
+            finding(Level::Info, "n", ""),
+        ];
+        let out = annotations(&f, &|f: &Finding| format!("game/{}", &f.file[6..]));
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 3, "{}", out);
+        assert_eq!(
+            lines[0],
+            "::error file=game/levels/one.tscn,line=4,title=godot-refcheck missing-resource::res://a.png is not in the project%0Aext_resource"
+        );
+        assert!(lines[1].starts_with("::warning file=game/levels/one.tscn,line=4,"), "{}", out);
+        assert!(lines[2].starts_with("::notice "), "{}", out);
+    }
+
+    #[test]
+    fn annotation_text_cannot_end_the_command_early() {
+        // A file name with a comma or a colon would otherwise start a new
+        // property, and a newline in a message would end the command.
+        assert_eq!(command_data("50% done\r\nnext"), "50%25 done%0D%0Anext");
+        assert_eq!(command_property("a,b:c%"), "a%2Cb%3Ac%25");
+    }
+
+    #[test]
+    fn sarif_locations_come_from_the_given_uri() {
+        let f = [finding(Level::Error, "m", "")];
+        let out = sarif(&f, &|_: &Finding| "game/levels/one.tscn".to_string());
+        assert!(out.contains("\"uri\": \"game/levels/one.tscn\""), "{}", out);
+    }
 }

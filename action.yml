@@ -34,6 +34,10 @@ inputs:
     description: Write a SARIF 2.1.0 report to this file.
     required: false
     default: ""
+  annotations:
+    description: "Also print every finding as a GitHub annotation, so a pull request shows it on the changed file without code scanning. GitHub displays at most 10 errors and 10 warnings per step; the step summary always has the full list."
+    required: false
+    default: "true"
   fix:
     description: Repair in place every reference that can be proved, then report what is left.
     required: false
@@ -167,6 +171,7 @@ runs:
         RC_ONLY: ${{ inputs.only }}
         RC_SKIP: ${{ inputs.skip }}
         RC_SARIF: ${{ inputs.sarif }}
+        RC_ANNOTATIONS: ${{ inputs.annotations }}
         RC_FIX: ${{ inputs.fix }}
         RC_FIX_DRY_RUN: ${{ inputs.fix-dry-run }}
         RC_BASELINE: ${{ inputs.baseline }}
@@ -236,6 +241,16 @@ runs:
           fi
           "$RC_BINARY" "$RC_PATH" ${args[@]+"${args[@]}"} --fail-on never
         } | tee "$report"
+        # Annotations are workflow commands on stdout: the runner places each
+        # one on its file and line. The binary names files relative to the
+        # working directory, which is the checkout, so they land on the diff.
+        # An older binary picked with `version:` has no --annotations; that
+        # costs the annotations, not the step.
+        if [ "$RC_ANNOTATIONS" = "true" ]; then
+          if ! "$RC_BINARY" "$RC_PATH" ${args[@]+"${args[@]}"} --annotations --fail-on never; then
+            echo "::warning::this godot-refcheck binary cannot print annotations; use a newer version, or set annotations: false"
+          fi
+        fi
         {
           echo "errors=$errors"
           echo "warnings=$warnings"

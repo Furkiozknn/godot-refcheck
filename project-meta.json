@@ -40,6 +40,7 @@
     "An Input Map action a script asks for by name and the project never defines is an error that names the action it most likely meant; actions added or tested for at run time count as present",
     "--fix repairs in place what the project itself settles: a moved file, a case-only difference, a uid that already resolves; two files with the same name produce no repair",
     "Verified against a headless Godot: ten engine-confirmed cases and two repair round trips where the engine errors before --fix and is silent after",
+    "Findings reach a pull request as GitHub annotations by default, and SARIF locations are relative to the checkout, so code scanning places them on the right file",
     "Calibrated on 237 projects in eleven real repositories: 50 findings, each confirmed by hand, no change proposed anywhere"
   ],
   "media": {
@@ -51,8 +52,8 @@
     "videos": []
   },
   "tests": {
-    "count": 169,
-    "source": "CI log: `=== 169 tests passed ===`",
+    "count": 176,
+    "source": "CI log: `=== 176 tests passed ===`",
     "measured": "2026-10-15"
   },
   "ci": {

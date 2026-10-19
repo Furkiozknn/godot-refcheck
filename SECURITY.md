@@ -28,6 +28,10 @@ It writes in exactly three cases, all asked for on the command line:
   pasting it into the script, and accepts only `[0-9A-Za-z.+-]` in `version`.
 - needs no token and no permissions beyond reading the checked-out code.
   Uploading SARIF is a separate step with `security-events: write`.
+- prints each finding as a workflow command (`::error file=…::…`) unless
+  `annotations` is `false`. `%`, carriage returns and line feeds in a message
+  are escaped, and `:` and `,` in the file and title as well, so a file name
+  in a pull request cannot end the command early or start a second one.
 
 ## Reporting a vulnerability
 

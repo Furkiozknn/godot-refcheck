@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -32,7 +32,8 @@ OPTIONS:
                          (default: error)
     --json               print machine-readable JSON instead of text
     --sarif <file>       also write a SARIF 2.1.0 report for GitHub code scanning
-    --quiet              print nothing but the summary line
+    --annotations        print GitHub Actions annotations instead of text
+    --quiet             print nothing but the summary line
     --list-checks        list the checks and exit
     -h, --help           print this help
     -V, --version        print the version
@@ -43,6 +44,12 @@ EXAMPLES:
     godot-refcheck . --fix               repair what has a single provable answer
     godot-refcheck repos --recursive     every project.godot under repos/
     godot-refcheck . --only duplicate-uid,case-mismatch
+    godot-refcheck . --annotations       in CI: findings on the pull request's diff
+
+PATHS:
+    --sarif and --annotations name each file relative to the current
+    directory, which is what GitHub resolves them against: run them from the
+    root of the checkout.
 
 EXIT CODES:
     0  no finding at or above --fail-on
@@ -56,6 +63,7 @@ struct Args {
     path: PathBuf,
     recursive: bool,
     json: bool,
+    annotations: bool,
     quiet: bool,
     sarif: Option<PathBuf>,
     fail_on: Option<Level>,
@@ -71,6 +79,7 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
         path: PathBuf::from("."),
         recursive: false,
         json: false,
+        annotations: false,
         quiet: false,
         sarif: None,
         fail_on: Some(Level::Error),
@@ -95,6 +104,7 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             "--recursive" | "-r" => a.recursive = true,
             "--unused" => a.opts.unused = true,
             "--json" => a.json = true,
+            "--annotations" => a.annotations = true,
             "--quiet" | "-q" => a.quiet = true,
             "--sarif" => a.sarif = Some(PathBuf::from(next("--sarif")?)),
             "--fix" => a.fix = true,
@@ -135,6 +145,9 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     if a.fix && a.fix_dry_run {
         return Err("--fix and --fix-dry-run cannot both be given".into());
     }
+    if a.json && a.annotations {
+        return Err("--json and --annotations cannot both be given".into());
+    }
     let known: BTreeSet<&str> = CHECKS.iter().map(|c| c.id).collect();
     for set in [a.opts.only.as_ref(), Some(&a.opts.skip)].into_iter().flatten() {
         for id in set {
@@ -155,6 +168,20 @@ fn relative_label(base: &Path, root: &Path) -> String {
         Ok(r) => r.display().to_string().replace('\\', "/"),
         Err(_) => root.display().to_string().replace('\\', "/"),
     }
+}
+
+/// `root` relative to the current directory, with forward slashes: the form
+/// GitHub resolves an annotation's `file` and a SARIF `uri` against, since
+/// both are read relative to the checkout. Empty for the current directory
+/// itself, and the full path when `root` is not under it.
+fn workspace_prefix(root: &Path) -> String {
+    let full = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let root = full(root);
+    let cwd = std::env::current_dir().map(|c| full(&c)).unwrap_or_default();
+    let rel = root.strip_prefix(&cwd).unwrap_or(root.as_path());
+    let s = rel.to_string_lossy().replace('\\', "/");
+    // Windows spells a canonical path `\\?\C:\...`.
+    s.strip_prefix("//?/").unwrap_or(&s).to_string()
 }
 
 fn split_ids(v: &str) -> BTreeSet<String> {
@@ -275,6 +302,8 @@ fn main() -> ExitCode {
     let mut chunks: Vec<String> = Vec::new();
     let mut applied: Vec<Applied> = Vec::new();
     let mut baselined = 0usize;
+    // project label -> that project's root relative to the current directory.
+    let mut prefixes: BTreeMap<String, String> = BTreeMap::new();
 
     for root in &roots {
         let mut p = Project::load(root);
@@ -299,11 +328,13 @@ fn main() -> ExitCode {
         for item in f.iter_mut() {
             item.project = label.clone();
         }
+        prefixes.insert(label, workspace_prefix(root));
         let (f, silenced) = baseline::split(f, &known);
         baselined += silenced;
         scanned += p.files.len();
         refs += checks::ref_count(&p);
-        if !args.quiet && !args.json && (roots.len() == 1 || !f.is_empty()) {
+        let as_text = !args.quiet && !args.json && !args.annotations;
+        if as_text && (roots.len() == 1 || !f.is_empty()) {
             chunks.push(report::text(
                 &f,
                 p.files.len(),
@@ -315,6 +346,16 @@ fn main() -> ExitCode {
     }
 
     godot_refcheck::finding::sort(&mut all);
+
+    // Where GitHub should look for a finding's file: under the checkout, not
+    // under the directory that was scanned.
+    let uri = |f: &Finding| -> String {
+        let rel = f.file.strip_prefix("res://").unwrap_or(&f.file);
+        match prefixes.get(&f.project) {
+            Some(prefix) if !prefix.is_empty() => format!("{}/{}", prefix, rel),
+            _ => rel.to_string(),
+        }
+    };
 
     if let Some(path) = &args.write_baseline {
         let text = baseline::render(&all, &report::today());
@@ -338,6 +379,8 @@ fn main() -> ExitCode {
                 baselined
             )
         );
+    } else if args.annotations {
+        print!("{}", report::annotations(&all, &uri));
     } else if args.quiet {
         println!("{}", report::summary(&all, roots.len(), scanned, refs));
     } else {
@@ -351,7 +394,7 @@ fn main() -> ExitCode {
     }
 
     if let Some(path) = &args.sarif {
-        if let Err(e) = std::fs::write(path, report::sarif(&all)) {
+        if let Err(e) = std::fs::write(path, report::sarif(&all, &uri)) {
             eprintln!("godot-refcheck: cannot write {}: {}", path.display(), e);
             return ExitCode::from(2);
         }

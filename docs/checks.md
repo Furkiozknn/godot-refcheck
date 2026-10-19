@@ -120,6 +120,33 @@ and the second script fails to load.
 Quiet when: the word appears in a comment or a string, or is used as an
 identifier — only a real top-level declaration counts.
 
+## `missing-input-action` (error)
+
+A script names an Input Map action with a literal, and the project does not
+define it: `Input.is_action_pressed("jmup")` where `project.godot` has `jump`
+under `[input]`. The methods read are `is_action_pressed`,
+`is_action_just_pressed`, `is_action_just_released`, `is_action_released`,
+`is_action`, `get_action_strength`, `get_action_raw_strength`, `action_press`
+and `action_release` (first argument), and `get_axis` and `get_vector` (every
+literal argument), on `Input` or on an `InputEvent`. `&"jump"` is read like
+`"jump"`.
+
+The engine's answer: `false` (or `0.0`) on every frame, and
+`ERROR: The InputMap action "jmup" doesn't exist.` printed only when the line
+runs. `tools/verify_with_godot.py` checks that message against
+`tests/standalone/inputmap`.
+
+When one defined action is at most two edits away (a swap of two neighbouring
+letters counts as one), or differs only in letter case, the finding names it.
+
+Quiet when: the action is one of the built-in `ui_*` actions; some script adds
+it (`InputMap.add_action("dash")`, or a literal `"input/dash"` passed to
+`ProjectSettings`) or tests for it (`InputMap.has_action("dash")`); the call is
+in a script under `res://addons/`; the project defines a method of the same
+name itself (`func is_action(...)`); the action is not a literal; or any script
+in the project calls `add_action` with a computed name, in which case the
+project is not judged at all.
+
 ## `byte-order-mark` (error)
 
 A `.tscn`, `.tres`, `.escn`, `.import`, `project.godot` or `.cfg` file starts

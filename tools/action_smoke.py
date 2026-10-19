@@ -322,6 +322,21 @@ def main() -> int:
     finally:
         shutil.rmtree(kopya.parent, ignore_errors=True)
 
+    # Annotations: one workflow command per finding, naming the file relative
+    # to the checkout so the runner can place it on a pull request's diff.
+    # `annotations: false` turns them off.
+    ekstra += 1
+    kod, cikti, gurultu = run_case(binary, path="tests/projects/broken", **{"fail-on": "never"})
+    want = "::error file=tests/projects/broken/main.tscn,line=4,title=godot-refcheck missing-resource::"
+    kod2, _, sessiz = run_case(binary, path="tests/projects/broken", annotations="false",
+                               **{"fail-on": "never"})
+    if kod != 0 or want not in gurultu or kod2 != 0 or "::error file=" in sessiz:
+        kalan += 1
+        print("HATA annotations: exit %d/%d, expected line %s" % (kod, kod2, "present" if want in gurultu else "missing"))
+        print("     " + gurultu.strip().replace("\n", "\n     ")[:600])
+    else:
+        print("ok   %-32s cikis %d" % ("annotations on, then off", kod))
+
     # A path that is not there fails the step instead of reporting a clean
     # project.
     ekstra += 1

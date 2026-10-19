@@ -392,6 +392,146 @@ pub fn guarded_node_paths(src: &str) -> Vec<String> {
     out
 }
 
+/// Methods that take one Input Map action name as their first argument, on
+/// `Input` and on `InputEvent`. Each of them reports an error and returns
+/// `false` (or `0.0`) when the action is not in the Input Map.
+pub const ACTION_QUERIES: &[&str] = &[
+    "is_action_pressed",
+    "is_action_just_pressed",
+    "is_action_just_released",
+    "is_action_released",
+    "is_action",
+    "get_action_strength",
+    "get_action_raw_strength",
+    "action_press",
+    "action_release",
+];
+
+/// Methods where every argument that is a string names an action:
+/// `Input.get_axis("left", "right")`, `Input.get_vector(...)`.
+pub const ACTION_LISTS: &[&str] = &["get_axis", "get_vector"];
+
+/// What one script says about Input Map actions.
+#[derive(Debug, Default, PartialEq)]
+pub struct ActionScan {
+    /// `(byte offset, method, action)` for every query whose action is a literal.
+    pub uses: Vec<(usize, String, String)>,
+    /// Actions the script adds at run time: `InputMap.add_action("dash")`, or
+    /// an `"input/dash"` setting handed to `ProjectSettings`.
+    pub added: Vec<String>,
+    /// Actions the script asks about before using: `InputMap.has_action("x")`.
+    pub guarded: Vec<String>,
+    /// `InputMap.add_action(name)` with a computed name: this script can add
+    /// actions that nothing in the files spells out.
+    pub computed_add: bool,
+    /// Query methods this script defines itself (`func is_action(...)`), so a
+    /// call by that name may not be the engine's.
+    pub shadowed: Vec<String>,
+}
+
+/// A string literal at `toks[j]`, also as GDScript 4's `&"name"` StringName:
+/// `(value, offset, index of the token after it)`.
+fn literal_at(toks: &[Tok], j: usize) -> Option<(String, usize, usize)> {
+    let j = match (toks.get(j), toks.get(j + 1)) {
+        (Some(Tok::Punct('&')), Some(Tok::Str { .. })) => j + 1,
+        _ => j,
+    };
+    match toks.get(j) {
+        Some(Tok::Str { value, offset }) => Some((value.clone(), *offset, j + 1)),
+        _ => None,
+    }
+}
+
+/// The literal at `toks[j]` when it is the whole argument, not the start of
+/// an expression such as `"act_" + n`.
+fn whole_literal(toks: &[Tok], j: usize) -> Option<(String, usize)> {
+    let (value, offset, next) = literal_at(toks, j)?;
+    match toks.get(next) {
+        Some(Tok::Punct(')')) | Some(Tok::Punct(',')) => Some((value, offset)),
+        _ => None,
+    }
+}
+
+/// Input Map actions named in a script, and the ways it adds or tests for them.
+///
+/// Only a literal argument is a claim: `Input.is_action_pressed(action)` with
+/// a variable is decided at run time and is left alone, the same rule
+/// `resource_loads` applies to paths. The receiver is not checked, because
+/// `event.is_action_pressed("x")` on an `InputEvent` asks the same Input Map
+/// as `Input.is_action_pressed("x")`.
+pub fn input_actions(src: &str) -> ActionScan {
+    let toks = lex(src);
+    let mut scan = ActionScan::default();
+    for (k, tok) in toks.iter().enumerate() {
+        let name = match tok {
+            Tok::Str { value, .. } => {
+                if let Some(action) = value.strip_prefix("input/") {
+                    if !action.is_empty() {
+                        scan.added.push(action.to_string());
+                    }
+                }
+                continue;
+            }
+            Tok::Ident(kw) if kw == "func" => {
+                if let Some(Tok::Ident(f)) = toks.get(k + 1) {
+                    if ACTION_QUERIES.contains(&f.as_str()) || ACTION_LISTS.contains(&f.as_str()) {
+                        scan.shadowed.push(f.clone());
+                    }
+                }
+                continue;
+            }
+            Tok::Ident(n) => n.as_str(),
+            Tok::Punct(_) => continue,
+        };
+        if toks.get(k + 1) != Some(&Tok::Punct('(')) {
+            continue;
+        }
+        let arg = k + 2;
+        match name {
+            "add_action" => match whole_literal(&toks, arg) {
+                Some((action, _)) => scan.added.push(action),
+                None => scan.computed_add = true,
+            },
+            "has_action" => {
+                if let Some((action, _)) = whole_literal(&toks, arg) {
+                    scan.guarded.push(action);
+                }
+            }
+            n if ACTION_QUERIES.contains(&n) => {
+                if let Some((action, offset)) = whole_literal(&toks, arg) {
+                    scan.uses.push((offset, n.to_string(), action));
+                }
+            }
+            n if ACTION_LISTS.contains(&n) => {
+                let mut depth = 0usize;
+                let mut at_argument = true;
+                let mut m = arg;
+                while let Some(t) = toks.get(m) {
+                    match t {
+                        Tok::Punct('(') | Tok::Punct('[') | Tok::Punct('{') => depth += 1,
+                        Tok::Punct(')') | Tok::Punct(']') | Tok::Punct('}') => {
+                            if depth == 0 {
+                                break;
+                            }
+                            depth -= 1;
+                        }
+                        _ => {}
+                    }
+                    if depth == 0 && at_argument {
+                        if let Some((action, offset)) = whole_literal(&toks, m) {
+                            scan.uses.push((offset, n.to_string(), action));
+                        }
+                    }
+                    at_argument = depth == 0 && *t == Tok::Punct(',');
+                    m += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    scan
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -599,5 +739,61 @@ mod tests {
     fn a_name_in_a_comment_is_not_collected() {
         assert!(assigned_node_names("# name = \"Aletler\"\n").is_empty());
         assert!(assigned_node_names("var x = 1\n").is_empty());
+    }
+
+    fn actions(src: &str) -> Vec<String> {
+        input_actions(src).uses.into_iter().map(|(_, _, a)| a).collect()
+    }
+
+    #[test]
+    fn a_literal_action_is_a_claim_on_the_input_map() {
+        assert_eq!(actions("if Input.is_action_pressed(\"jump\"): pass\n"), ["jump"]);
+        assert_eq!(actions("if event.is_action_released('fire'): pass\n"), ["fire"]);
+        assert_eq!(actions("var s = Input.get_action_strength(\"gas\")\n"), ["gas"]);
+    }
+
+    #[test]
+    fn a_string_name_literal_is_read_like_a_string() {
+        assert_eq!(actions("if Input.is_action_just_pressed(&\"jump\"): pass\n"), ["jump"]);
+    }
+
+    #[test]
+    fn every_literal_argument_of_get_axis_and_get_vector_is_an_action() {
+        assert_eq!(actions("var x = Input.get_axis(\"left\", \"right\")\n"), ["left", "right"]);
+        let v = actions("var v = Input.get_vector(&\"l\", &\"r\", \"u\", \"d\", 0.2)\n");
+        assert_eq!(v, ["l", "r", "u", "d"]);
+    }
+
+    #[test]
+    fn a_computed_action_is_not_judged() {
+        assert!(actions("if Input.is_action_pressed(action): pass\n").is_empty());
+        assert!(actions("if Input.is_action_pressed(\"p\" + str(i)): pass\n").is_empty());
+        assert!(actions("var x = Input.get_axis(prefix + \"l\", \"r\" % n)\n").is_empty());
+    }
+
+    #[test]
+    fn an_action_in_a_comment_or_a_string_is_not_a_claim() {
+        assert!(actions("# Input.is_action_pressed(\"jump\")\n").is_empty());
+        assert!(actions("var s = \"Input.is_action_pressed('jump')\"\n").is_empty());
+    }
+
+    #[test]
+    fn actions_added_or_asked_about_at_run_time_are_collected() {
+        let scan = input_actions(
+            "InputMap.add_action(\"dash\")\n\
+             ProjectSettings.set_setting(\"input/crouch\", {})\n\
+             if InputMap.has_action(\"debug\"): pass\n",
+        );
+        assert_eq!(scan.added, ["dash", "crouch"]);
+        assert_eq!(scan.guarded, ["debug"]);
+        assert!(!scan.computed_add);
+        assert!(input_actions("InputMap.add_action(name)\n").computed_add);
+    }
+
+    #[test]
+    fn a_script_defining_a_query_method_shadows_it() {
+        let scan = input_actions("func is_action_pressed(a: String) -> bool:\n\treturn false\n");
+        assert_eq!(scan.shadowed, ["is_action_pressed"]);
+        assert!(scan.uses.is_empty());
     }
 }
